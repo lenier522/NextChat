@@ -39,26 +39,24 @@ public class MailService extends Service {
 
     private MessageDao dao;
     private Session    session;
+    private boolean    pollingStarted = false;
 
     @Override
     public void onCreate() {
         super.onCreate();
-        // Room DAO
         dao = AppDatabase.getInstance(this).messageDao();
 
-        // IMAP session setup
+        // Configuración IMAP
         Properties props = new Properties();
         props.put("mail.imap.host", "imap.nauta.cu");
         props.put("mail.imap.port", "143");
         props.put("mail.imap.ssl.enable", "false");
         session = Session.getInstance(props);
 
-        // Create notification channel for Android O+
+        // Canal de notificación (Android O+)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel chan = new NotificationChannel(
-                    CHAN_ID,
-                    "NextChat Sync",
-                    NotificationManager.IMPORTANCE_LOW
+                    CHAN_ID, "NextChat Sync", NotificationManager.IMPORTANCE_LOW
             );
             chan.setDescription("Sincronización de correo IMAP");
             ((NotificationManager)getSystemService(NOTIFICATION_SERVICE))
@@ -68,7 +66,7 @@ public class MailService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        // Build and post the foreground notification
+        // Crear y mostrar notificación en primer plano
         Notification notif = new NotificationCompat.Builder(this, CHAN_ID)
                 .setContentTitle("NextChat")
                 .setContentText("Sincronizando mensajes…")
@@ -77,15 +75,21 @@ public class MailService extends Service {
                 .build();
         startForeground(NOTIF_ID, notif);
 
-        // Start polling loop on background thread
-        new Thread(this::pollLoop).start();
+        // Iniciar polling sólo una vez
+        if (!pollingStarted) {
+            pollingStarted = true;
+            new Thread(this::pollLoop).start();
+        }
+
         return START_STICKY;
     }
 
     private void pollLoop() {
         try {
-            String email = getSharedPreferences("prefs", MODE_PRIVATE).getString("email", "");
-            String pass  = getSharedPreferences("prefs", MODE_PRIVATE).getString("pass", "");
+            String email = getSharedPreferences("prefs", MODE_PRIVATE)
+                    .getString("email", "");
+            String pass  = getSharedPreferences("prefs", MODE_PRIVATE)
+                    .getString("pass", "");
 
             Store store = session.getStore("imap");
             store.connect("imap.nauta.cu", 143, email, pass);
@@ -115,7 +119,9 @@ public class MailService extends Service {
             String subj = m.getSubject();
             if (!TXT_SUBJ.equals(subj) && !AUD_SUBJ.equals(subj)) return;
 
-            String me = getSharedPreferences("prefs", MODE_PRIVATE).getString("email", "");
+            String me = getSharedPreferences("prefs", MODE_PRIVATE)
+                    .getString("email", "");
+
             Message msg = new Message();
             msg.fromAddress    = m.getFrom()[0].toString();
             msg.toAddress      = me;
@@ -126,8 +132,7 @@ public class MailService extends Service {
 
             Object content = m.getContent();
             if (TXT_SUBJ.equals(subj) && !(content instanceof javax.mail.Multipart)) {
-                String cipher = content.toString();
-                msg.body           = CryptoHelper.decrypt(cipher);
+                msg.body           = CryptoHelper.decrypt(content.toString());
                 msg.attachmentPath = null;
                 msg.type           = "text";
 
@@ -138,7 +143,6 @@ public class MailService extends Service {
                 for (int i = 0; i < mp.getCount(); i++) {
                     Part part = mp.getBodyPart(i);
                     if (Part.ATTACHMENT.equalsIgnoreCase(part.getDisposition())) {
-                        // Save encrypted audio
                         File dir = new File(getExternalFilesDir(null), "audios_recibidos");
                         if (!dir.exists()) dir.mkdirs();
                         File enc = new File(dir, System.currentTimeMillis() + "_" + part.getFileName());
@@ -148,7 +152,6 @@ public class MailService extends Service {
                             int r;
                             while ((r = is.read(buf)) > 0) fos.write(buf, 0, r);
                         }
-                        // Decrypt to .3gp
                         File dec = new File(dir, enc.getName().replace(".enc", ".3gp"));
                         CryptoHelper.decryptAudio(enc, dec);
                         enc.delete();

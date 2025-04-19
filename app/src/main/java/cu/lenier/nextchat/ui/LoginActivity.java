@@ -3,6 +3,7 @@ package cu.lenier.nextchat.ui;
 import android.app.ProgressDialog;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.os.Build;
 import android.os.Bundle;
 
 import androidx.appcompat.app.AlertDialog;
@@ -25,17 +26,15 @@ public class LoginActivity extends AppCompatActivity {
     private Button   btnLogin;
     private ProgressDialog pd;
 
-    @Override protected void onCreate(Bundle savedInstanceState) {
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
         SharedPreferences prefs = getSharedPreferences("prefs", MODE_PRIVATE);
         String e = prefs.getString("email", "");
         String p = prefs.getString("pass", "");
         if (!e.isEmpty() && !p.isEmpty()) {
-            // Start as foreground service
-            Intent svc = new Intent(this, MailService.class);
-            ContextCompat.startForegroundService(this, svc);
-
+            startMailService();
             startActivity(new Intent(this, ChatListActivity.class));
             finish();
             return;
@@ -83,8 +82,7 @@ public class LoginActivity extends AppCompatActivity {
 
                 runOnUiThread(() -> {
                     pd.dismiss();
-                    Intent svc = new Intent(this, MailService.class);
-                    ContextCompat.startForegroundService(this, svc);
+                    startMailService();
                     startActivity(new Intent(this, ChatListActivity.class));
                     finish();
                 });
@@ -97,6 +95,15 @@ public class LoginActivity extends AppCompatActivity {
                 });
             }
         }).start();
+    }
+
+    private void startMailService() {
+        Intent svc = new Intent(this, MailService.class);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            ContextCompat.startForegroundService(this, svc);
+        } else {
+            startService(svc);
+        }
     }
 
     private void showError(String msg) {
