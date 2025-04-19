@@ -7,6 +7,8 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
 
     <application
         android:name=".config.AppConfig"
@@ -36,6 +38,8 @@
 
         <service
             android:name=".service.MailService"
-            android:exported="false" />
+            android:exported="false"
+            android:foregroundServiceType="dataSync"/>
+
     </application>
 </manifest>

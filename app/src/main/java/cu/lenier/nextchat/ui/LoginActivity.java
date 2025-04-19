@@ -7,6 +7,7 @@ import android.os.Bundle;
 
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.content.ContextCompat;
 
 import android.widget.Button;
 import android.widget.EditText;
@@ -24,15 +25,20 @@ public class LoginActivity extends AppCompatActivity {
     private Button   btnLogin;
     private ProgressDialog pd;
 
-    @Override protected void onCreate(Bundle s) {
-        super.onCreate(s);
-        SharedPreferences prefs = getSharedPreferences("prefs",MODE_PRIVATE);
-        String e=prefs.getString("email",""), p=prefs.getString("pass","");
-        if(!e.isEmpty()&&!p.isEmpty()){
-            // inicia servicio aquí
-            startService(new Intent(this,MailService.class));
-            startActivity(new Intent(this,ChatListActivity.class));
-            finish(); return;
+    @Override protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+
+        SharedPreferences prefs = getSharedPreferences("prefs", MODE_PRIVATE);
+        String e = prefs.getString("email", "");
+        String p = prefs.getString("pass", "");
+        if (!e.isEmpty() && !p.isEmpty()) {
+            // Start as foreground service
+            Intent svc = new Intent(this, MailService.class);
+            ContextCompat.startForegroundService(this, svc);
+
+            startActivity(new Intent(this, ChatListActivity.class));
+            finish();
+            return;
         }
 
         setContentView(R.layout.activity_login);
@@ -44,39 +50,45 @@ public class LoginActivity extends AppCompatActivity {
         pd.setMessage("Verificando…");
         pd.setCancelable(false);
 
-        btnLogin.setOnClickListener(v->attemptLogin());
+        btnLogin.setOnClickListener(v -> attemptLogin());
     }
 
-    private void attemptLogin(){
-        String email=etEmail.getText().toString().trim();
-        String pass =etPass.getText().toString().trim();
-        if(email.isEmpty()||pass.isEmpty()){
-            showError("Complete ambos"); return;
+    private void attemptLogin() {
+        String email = etEmail.getText().toString().trim();
+        String pass  = etPass.getText().toString().trim();
+        if (email.isEmpty() || pass.isEmpty()) {
+            showError("Complete ambos campos");
+            return;
         }
-        btnLogin.setEnabled(false); pd.show();
+        btnLogin.setEnabled(false);
+        pd.show();
 
         new Thread(() -> {
             try {
                 Properties props = new Properties();
-                props.put("mail.store.protocol","imap");
-                props.put("mail.imap.host","imap.nauta.cu");
-                props.put("mail.imap.port","143");
-                props.put("mail.imap.ssl.enable","false");
+                props.put("mail.store.protocol", "imap");
+                props.put("mail.imap.host", "imap.nauta.cu");
+                props.put("mail.imap.port", "143");
+                props.put("mail.imap.ssl.enable", "false");
                 Session sess = Session.getInstance(props);
                 Store store = sess.getStore("imap");
                 store.connect(email, pass);
                 store.close();
 
-                SharedPreferences prefs = getSharedPreferences("prefs",MODE_PRIVATE);
-                prefs.edit().putString("email",email).putString("pass",pass).apply();
+                SharedPreferences prefs = getSharedPreferences("prefs", MODE_PRIVATE);
+                prefs.edit()
+                        .putString("email", email)
+                        .putString("pass", pass)
+                        .apply();
 
                 runOnUiThread(() -> {
                     pd.dismiss();
-                    startService(new Intent(this,MailService.class));
-                    startActivity(new Intent(this,ChatListActivity.class));
+                    Intent svc = new Intent(this, MailService.class);
+                    ContextCompat.startForegroundService(this, svc);
+                    startActivity(new Intent(this, ChatListActivity.class));
                     finish();
                 });
-            } catch(Exception e){
+            } catch (Exception e) {
                 e.printStackTrace();
                 runOnUiThread(() -> {
                     pd.dismiss();
@@ -89,7 +101,9 @@ public class LoginActivity extends AppCompatActivity {
 
     private void showError(String msg) {
         new AlertDialog.Builder(this)
-                .setTitle("Error").setMessage(msg)
-                .setPositiveButton("OK",null).show();
+                .setTitle("Error")
+                .setMessage(msg)
+                .setPositiveButton("OK", null)
+                .show();
     }
 }
