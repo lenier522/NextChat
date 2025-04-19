@@ -1,57 +1,98 @@
-// src/main/java/cu/lenier/nextchat/adapter/MessageAdapter.java
 package cu.lenier.nextchat.adapter;
 
+import android.media.MediaPlayer;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.ImageButton;
 import android.widget.TextView;
+
 import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
+
 import cu.lenier.nextchat.R;
 import cu.lenier.nextchat.model.Message;
+
+import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 
 public class MessageAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
-    private List<Message> messages = new ArrayList<>();
-    private static final int SENT = 1, RECEIVED = 2;
+    private static final int SENT_TEXT  = 1;
+    private static final int RECV_TEXT  = 2;
+    private static final int SENT_AUDIO = 3;
+    private static final int RECV_AUDIO = 4;
 
-    public void setMessages(List<Message> m) {
-        messages = m != null ? m : new ArrayList<>();
+    private List<Message> messages = new ArrayList<>();
+
+    public void setMessages(List<Message> m){
+        messages = m!=null?m:new ArrayList<>();
         notifyDataSetChanged();
     }
 
-    @Override public int getItemViewType(int pos) {
-        return messages.get(pos).sent ? SENT : RECEIVED;
+    @Override public int getItemViewType(int pos){
+        Message m = messages.get(pos);
+        boolean isAudio = "audio".equals(m.type);
+        return m.sent
+                ? isAudio?SENT_AUDIO:SENT_TEXT
+                : isAudio?RECV_AUDIO:RECV_TEXT;
     }
 
     @NonNull @Override
-    public RecyclerView.ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int vt) {
-        int layout = vt == SENT
-                ? R.layout.item_message_sent
-                : R.layout.item_message_received;
-        View v = LayoutInflater.from(parent.getContext()).inflate(layout, parent, false);
-        return new VH(v);
+    public RecyclerView.ViewHolder onCreateViewHolder(@NonNull ViewGroup p,int vt){
+        int layout;
+        switch(vt){
+            case SENT_AUDIO:   layout=R.layout.item_message_audio_sent;    break;
+            case RECV_AUDIO:   layout=R.layout.item_message_audio_received;break;
+            case RECV_TEXT:    layout=R.layout.item_message_received;      break;
+            case SENT_TEXT:
+            default:           layout=R.layout.item_message_sent;          break;
+        }
+        View v = LayoutInflater.from(p.getContext()).inflate(layout,p,false);
+        return new VH(v,vt);
     }
 
-    @Override
-    public void onBindViewHolder(@NonNull RecyclerView.ViewHolder h, int pos) {
-        VH vh = (VH)h;
-        Message m = messages.get(pos);
-        vh.tvBody.setText(m.body);
-        vh.tvTime.setText(new SimpleDateFormat("HH:mm").format(new Date(m.timestamp)));
+    @Override public void onBindViewHolder(@NonNull RecyclerView.ViewHolder h,int pos){
+        ((VH)h).bind(messages.get(pos));
     }
 
-    @Override public int getItemCount() { return messages.size(); }
+    @Override public int getItemCount(){ return messages.size(); }
 
-    static class VH extends RecyclerView.ViewHolder {
+    class VH extends RecyclerView.ViewHolder {
         TextView tvBody, tvTime;
-        VH(View v) {
-            super(v);
-            tvBody = v.findViewById(R.id.tvBody);
+        ImageButton btnPlay;
+        int type;
+
+        VH(View v,int t){
+            super(v); type=t;
             tvTime = v.findViewById(R.id.tvTime);
+            if(type==SENT_TEXT||type==RECV_TEXT){
+                tvBody = v.findViewById(R.id.tvBody);
+            } else {
+                btnPlay = v.findViewById(R.id.btnPlay);
+            }
+        }
+
+        void bind(Message m){
+            tvTime.setText(new SimpleDateFormat("HH:mm", Locale.getDefault())
+                    .format(new Date(m.timestamp)));
+            if(type==SENT_TEXT||type==RECV_TEXT){
+                tvBody.setText(m.body);
+            } else {
+                btnPlay.setOnClickListener(v->{
+                    MediaPlayer mp = new MediaPlayer();
+                    try{
+                        mp.setDataSource(m.attachmentPath);
+                        mp.prepare();
+                        mp.start();
+                    } catch(IOException e){
+                        e.printStackTrace();
+                    }
+                });
+            }
         }
     }
 }

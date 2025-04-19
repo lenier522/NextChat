@@ -1,4 +1,3 @@
-// src/main/java/cu/lenier/nextchat/adapter/ChatListAdapter.java
 package cu.lenier.nextchat.adapter;
 
 import android.os.Build;
@@ -6,69 +5,51 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.TextView;
+
 import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
+
 import cu.lenier.nextchat.R;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
 public class ChatListAdapter extends RecyclerView.Adapter<ChatListAdapter.VH> {
-    public interface OnItemClickListener { void onClick(String contact); }
-    public interface OnItemLongClickListener { void onLongClick(String contact); }
+    public interface OnItemClickListener { void onClick(String c); }
+    public interface OnItemLongClickListener { void onLongClick(String c); }
 
     private List<String> contacts = new ArrayList<>();
     private Map<String,Integer> unreadMap = Map.of();
-    private OnItemClickListener clickListener;
-    private OnItemLongClickListener longClickListener;
+    private OnItemClickListener clickL;
+    private OnItemLongClickListener longL;
 
-    public void setOnItemClickListener(OnItemClickListener l) { clickListener = l; }
-    public void setOnItemLongClickListener(OnItemLongClickListener l) { longClickListener = l; }
+    public void setOnItemClickListener(OnItemClickListener l){ clickL=l; }
+    public void setOnItemLongClickListener(OnItemLongClickListener l){ longL=l; }
+    public void setContacts(List<String> c){ contacts=c!=null?c:new ArrayList<>(); notifyDataSetChanged(); }
+    public void setUnreadMap(Map<String,Integer> m){ unreadMap=m; notifyDataSetChanged(); }
 
-    public void setContacts(List<String> c) {
-        contacts = c != null ? c : new ArrayList<>();
-        notifyDataSetChanged();
-    }
-    public List<String> getContacts() { return contacts; }
-
-    public void setUnreadMap(Map<String,Integer> m) {
-        unreadMap = m;
-        notifyDataSetChanged();
-    }
-
-    @NonNull @Override
-    public VH onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
-        View v = LayoutInflater.from(parent.getContext())
-                .inflate(R.layout.item_chat_contact, parent, false);
+    @NonNull @Override public VH onCreateViewHolder(@NonNull ViewGroup p,int i){
+        View v = LayoutInflater.from(p.getContext()).inflate(R.layout.item_chat_contact,p,false);
         return new VH(v);
     }
-
-    @Override
-    public void onBindViewHolder(@NonNull VH holder, int position) {
-        String c = contacts.get(position);
-        holder.tvContact.setText(c);
-
-        int count = 0;
+    @Override public void onBindViewHolder(@NonNull VH h,int pos){
+        String c = contacts.get(pos);
+        h.tvContact.setText(c);
+        int cnt = 0;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            count = unreadMap.getOrDefault(c, 0);
+            cnt = unreadMap.getOrDefault(c,0);
         }
-        holder.tvBadge.setVisibility(count > 0 ? View.VISIBLE : View.GONE);
-        holder.tvBadge.setText(String.valueOf(count));
-
-        holder.itemView.setOnClickListener(v -> {
-            if (clickListener != null) clickListener.onClick(c);
-        });
-        holder.itemView.setOnLongClickListener(v -> {
-            if (longClickListener != null) longClickListener.onLongClick(c);
-            return true;
-        });
+        h.tvBadge.setVisibility(cnt>0?View.VISIBLE:View.GONE);
+        h.tvBadge.setText(String.valueOf(cnt));
+        h.itemView.setOnClickListener(v->clickL.onClick(c));
+        h.itemView.setOnLongClickListener(v->{ longL.onLongClick(c); return true; });
     }
-
-    @Override public int getItemCount() { return contacts.size(); }
+    @Override public int getItemCount(){ return contacts.size(); }
 
     static class VH extends RecyclerView.ViewHolder {
         TextView tvContact, tvBadge;
-        VH(View v) {
+        VH(View v){
             super(v);
             tvContact = v.findViewById(R.id.tvContact);
             tvBadge   = v.findViewById(R.id.tvBadge);

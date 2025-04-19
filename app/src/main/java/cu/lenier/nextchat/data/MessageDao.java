@@ -1,4 +1,3 @@
-// src/main/java/cu/lenier/nextchat/data/MessageDao.java
 package cu.lenier.nextchat.data;
 
 import androidx.lifecycle.LiveData;
@@ -15,28 +14,32 @@ import cu.lenier.nextchat.model.UnreadCount;
 public interface MessageDao {
     @Insert void insert(Message msg);
 
-    // Hilo de un contacto
-    @Query("SELECT * FROM messages WHERE (fromAddress = :addr OR toAddress = :addr) AND subject = 'NextChat' ORDER BY timestamp ASC")
+    @Query("SELECT * FROM messages " +
+            "WHERE subject IN ('NextChat','NextChat Audio') " +
+            "  AND (fromAddress = :addr OR toAddress = :addr) " +
+            "ORDER BY timestamp ASC")
     LiveData<List<Message>> getByContact(String addr);
 
-    // Lista de contactos con los que has intercambiado NextChat
-    @Query("SELECT DISTINCT CASE WHEN sent = 1 THEN toAddress ELSE fromAddress END " +
-            "FROM messages WHERE subject = 'NextChat'")
+    @Query("SELECT DISTINCT CASE WHEN sent=1 THEN toAddress ELSE fromAddress END " +
+            "FROM messages " +
+            "WHERE subject IN ('NextChat','NextChat Audio')")
     LiveData<List<String>> getContacts();
 
-    // Conteo de no leídos
-    @Query("SELECT CASE WHEN sent = 1 THEN toAddress ELSE fromAddress END AS contact, " +
+    @Query("SELECT CASE WHEN sent=1 THEN toAddress ELSE fromAddress END AS contact, " +
             "COUNT(*) AS unread " +
             "FROM messages " +
-            "WHERE sent = 0 AND read = 0 AND subject = 'NextChat' " +
+            "WHERE subject IN ('NextChat','NextChat Audio') " +
+            "  AND sent=0 AND read=0 " +
             "GROUP BY contact")
     LiveData<List<UnreadCount>> getUnreadCounts();
 
-    // Marcar como leídos
-    @Query("UPDATE messages SET read = 1 WHERE fromAddress = :contact AND toAddress = :me AND subject = 'NextChat' AND read = 0")
+    @Query("UPDATE messages SET read=1 " +
+            "WHERE subject IN ('NextChat','NextChat Audio') " +
+            "  AND fromAddress=:contact AND toAddress=:me AND read=0")
     void markAsRead(String contact, String me);
 
-    // Eliminar chat completo
-    @Query("DELETE FROM messages WHERE (fromAddress = :contact OR toAddress = :contact) AND subject = 'NextChat'")
+    @Query("DELETE FROM messages " +
+            "WHERE subject IN ('NextChat','NextChat Audio') " +
+            "  AND (fromAddress=:contact OR toAddress=:contact)")
     void deleteByContact(String contact);
 }

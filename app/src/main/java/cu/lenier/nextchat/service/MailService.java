@@ -7,9 +7,13 @@ import android.util.Log;
 
 import com.sun.mail.imap.IMAPFolder;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
 import java.util.Properties;
 
 import javax.mail.Folder;
+import javax.mail.Part;
 import javax.mail.Session;
 import javax.mail.Store;
 import javax.mail.event.MessageCountAdapter;
@@ -21,83 +25,103 @@ import cu.lenier.nextchat.model.Message;
 import cu.lenier.nextchat.util.CryptoHelper;
 
 public class MailService extends Service {
-    private static final String TAG     = "MailService";
-    private static final String SUBJECT = "NextChat";
+    private static final String TAG      = "MailService";
+    private static final String TXT_SUBJ = "NextChat";
+    private static final String AUD_SUBJ = "NextChat Audio";
 
-    private Session session;
     private MessageDao dao;
+    private Session    session;
 
     @Override public void onCreate() {
         super.onCreate();
         dao = AppDatabase.getInstance(this).messageDao();
-
         Properties props = new Properties();
-        props.put("mail.imap.host", "imap.nauta.cu");
-        props.put("mail.imap.port", "143");
-        props.put("mail.imap.ssl.enable", "false");
+        props.put("mail.imap.host","imap.nauta.cu");
+        props.put("mail.imap.port","143");
+        props.put("mail.imap.ssl.enable","false");
         session = Session.getInstance(props);
-        session.setDebug(true);
-
         new Thread(this::pollLoop).start();
     }
 
     private void pollLoop() {
         try {
-            SharedPreferences prefs = getSharedPreferences("prefs", MODE_PRIVATE);
-            String email = prefs.getString("email", "");
-            String pass  = prefs.getString("pass", "");
+            SharedPreferences p = getSharedPreferences("prefs", MODE_PRIVATE);
+            String email = p.getString("email",""), pass = p.getString("pass","");
 
             Store store = session.getStore("imap");
-            store.connect("imap.nauta.cu", 143, email, pass);
+            store.connect("imap.nauta.cu",143,email,pass);
 
-            IMAPFolder inbox = (IMAPFolder) store.getFolder("INBOX");
+            IMAPFolder inbox = (IMAPFolder)store.getFolder("INBOX");
             inbox.open(Folder.READ_WRITE);
-            inbox.addMessageCountListener(new MessageCountAdapter() {
-                @Override public void messagesAdded(MessageCountEvent ev) {
+            inbox.addMessageCountListener(new MessageCountAdapter(){
+                @Override public void messagesAdded(MessageCountEvent ev){
                     for (javax.mail.Message m : ev.getMessages()) {
                         handleIncoming(m);
                     }
                 }
             });
 
-            while (!Thread.currentThread().isInterrupted()) {
+            while(true) {
                 inbox.getMessageCount();
                 Thread.sleep(5000);
             }
-        } catch (Exception e) {
-            Log.e(TAG, "pollLoop error", e);
+        } catch(Exception e){
+            Log.e(TAG,"pollLoop",e);
         }
     }
 
     private void handleIncoming(javax.mail.Message m) {
         try {
-            // 1) Filtrar asunto
-            if (!SUBJECT.equals(m.getSubject())) {
-                Log.d(TAG, "Ignorado asunto=" + m.getSubject());
-                return;
-            }
+            String subj = m.getSubject();
+            if (!TXT_SUBJ.equals(subj) && !AUD_SUBJ.equals(subj)) return;
 
-            // 2) Obtener y descifrar
-            String cipher = m.getContent().toString();
-            String plain  = CryptoHelper.decrypt(cipher);
+            SharedPreferences p = getSharedPreferences("prefs", MODE_PRIVATE);
+            String me = p.getString("email","");
 
-            SharedPreferences prefs = getSharedPreferences("prefs", MODE_PRIVATE);
-            String me = prefs.getString("email", "");
-
-            // 3) Guardar en claro
             Message msg = new Message();
             msg.fromAddress = m.getFrom()[0].toString();
             msg.toAddress   = me;
-            msg.subject     = SUBJECT;
-            msg.body        = plain;
-            msg.timestamp   = m.getReceivedDate().getTime();
-            msg.sent        = false;
+            msg.subject     = subj;
             msg.read        = false;
-            dao.insert(msg);
+            msg.sent        = false;
+            msg.timestamp   = m.getReceivedDate().getTime();
 
-            Log.d(TAG, "NextChat entrante de " + msg.fromAddress);
-        } catch (Exception e) {
-            Log.e(TAG, "Error descifrando/guardando", e);
+            Object cnt = m.getContent();
+            if (TXT_SUBJ.equals(subj) && !(cnt instanceof javax.mail.Multipart)) {
+                String cipher = cnt.toString();
+                msg.body           = CryptoHelper.decrypt(cipher);
+                msg.attachmentPath = null;
+                msg.type           = "text";
+
+            } else if (AUD_SUBJ.equals(subj) && cnt instanceof javax.mail.Multipart) {
+                javax.mail.Multipart mp = (javax.mail.Multipart)cnt;
+                msg.body = "";
+                msg.type = "audio";
+                for (int i=0;i<mp.getCount();i++){
+                    Part part = mp.getBodyPart(i);
+                    if (Part.ATTACHMENT.equalsIgnoreCase(part.getDisposition())) {
+                        File dir = new File(getExternalFilesDir(null),"audios_recibidos");
+                        if (!dir.exists()) dir.mkdirs();
+                        File enc = new File(dir, System.currentTimeMillis()+"_"+part.getFileName());
+                        try (InputStream is = part.getInputStream();
+                             FileOutputStream fos = new FileOutputStream(enc)) {
+                            byte[] buf=new byte[4096];int r;
+                            while((r=is.read(buf))>0) fos.write(buf,0,r);
+                        }
+                        File dec = new File(dir, enc.getName().replace(".enc",".3gp"));
+                        CryptoHelper.decryptAudio(enc,dec);
+                        enc.delete();
+                        msg.attachmentPath = dec.getAbsolutePath();
+                        break;
+                    }
+                }
+            }
+
+            dao.insert(msg);
+            Log.d(TAG,"Incoming "+msg.type+" from "+msg.fromAddress);
+
+        } catch(Exception e){
+            Log.e(TAG,"handleIncoming",e);
         }
     }
 
