@@ -77,7 +77,8 @@ public class MessageAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
         }
 
         void bind(Message m){
-            tvTime.setText(new SimpleDateFormat("HH:mm", Locale.getDefault())
+//            tvTime.setText(new SimpleDateFormat("HH:mm", Locale.getDefault())
+            tvTime.setText(new SimpleDateFormat("hh:mm a",Locale.getDefault())
                     .format(new Date(m.timestamp)));
             if(type==SENT_TEXT||type==RECV_TEXT){
                 tvBody.setText(m.body);
