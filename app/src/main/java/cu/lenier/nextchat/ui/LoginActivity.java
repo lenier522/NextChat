@@ -3,15 +3,18 @@ package cu.lenier.nextchat.ui;
 import android.app.ProgressDialog;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
 
+import androidx.annotation.NonNull;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
 
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.Toast;
 
 import java.util.Properties;
 
@@ -20,6 +23,8 @@ import javax.mail.Store;
 
 import cu.lenier.nextchat.R;
 import cu.lenier.nextchat.service.MailService;
+import cu.lenier.nextchat.util.PermissionHelper;
+import cu.lenier.nextchat.work.MailSyncWorker;
 
 public class LoginActivity extends AppCompatActivity {
     private EditText etEmail, etPass;
@@ -40,6 +45,10 @@ public class LoginActivity extends AppCompatActivity {
             return;
         }
 
+        // 1) Pedir permisos al arrancar si faltan
+        PermissionHelper.requestPermissionsIfNeeded(this);
+
+
         setContentView(R.layout.activity_login);
         etEmail = findViewById(R.id.etEmail);
         etPass  = findViewById(R.id.etPass);
@@ -51,6 +60,32 @@ public class LoginActivity extends AppCompatActivity {
 
         btnLogin.setOnClickListener(v -> attemptLogin());
     }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode,
+                                           @NonNull String[] permissions,
+                                           @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+
+        if (requestCode == PermissionHelper.REQ_PERMS) {
+            boolean allGranted = true;
+            for (int res : grantResults) {
+                if (res != PackageManager.PERMISSION_GRANTED) {
+                    allGranted = false;
+                    break;
+                }
+            }
+            if (!allGranted) {
+                // Si el usuario denegó alguno, puedes informarle:
+                Toast.makeText(this,
+                        "Necesitamos esos permisos para enviar audio y notificaciones",
+                        Toast.LENGTH_LONG).show();
+                // Y volver a pedirlos, o bien deshabilitar la función:
+                PermissionHelper.requestPermissionsIfNeeded(this);
+            }
+        }
+    }
+
 
     private void attemptLogin() {
         String email = etEmail.getText().toString().trim();
@@ -83,6 +118,7 @@ public class LoginActivity extends AppCompatActivity {
                 runOnUiThread(() -> {
                     pd.dismiss();
                     startMailService();
+                    MailSyncWorker.schedulePeriodicSync(this);
                     startActivity(new Intent(this, ChatListActivity.class));
                     finish();
                 });

@@ -2,10 +2,13 @@ package cu.lenier.nextchat.util;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
 import android.util.Log;
 
 import java.io.File;
 import java.util.Properties;
+import java.util.concurrent.Executors;
 
 import javax.activation.DataHandler;
 import javax.activation.FileDataSource;
@@ -19,116 +22,131 @@ import javax.mail.internet.MimeMessage;
 import javax.mail.internet.MimeMultipart;
 
 import cu.lenier.nextchat.data.AppDatabase;
+import cu.lenier.nextchat.data.MessageDao;
 import cu.lenier.nextchat.model.Message;
 
 public class MailHelper {
-    private static final String TAG      = "MailHelper";
     private static final String TXT_SUBJ = "NextChat";
     private static final String AUD_SUBJ = "NextChat Audio";
 
-    public static void sendEmail(Context ctx, String to, String plainBody) {
-        new Thread(() -> {
+    public static void sendEmail(Context ctx, Message m) {
+        // Ejecutamos TODO en background
+        Executors.newSingleThreadExecutor().execute(() -> {
+            MessageDao dao = AppDatabase.getInstance(ctx).messageDao();
+
+            // 1) Insert inicial
+            long id = dao.insert(m);
+            m.id = (int) id;
+
+            // 2) Comprobar red
+            if (!hasNetwork(ctx)) {
+                m.sendState = Message.STATE_FAILED;
+                dao.update(m);
+                return;
+            }
+
+            // 3) Intentar envío SMTP
             try {
-                SharedPreferences p = ctx.getSharedPreferences("prefs", Context.MODE_PRIVATE);
-                String email = p.getString("email",""), pass = p.getString("pass","");
-                if (email.isEmpty()||pass.isEmpty()) return;
-
-                String cipher = CryptoHelper.encrypt(plainBody);
-
+                String cipher = CryptoHelper.encrypt(m.body);
                 Properties props = new Properties();
-                props.put("mail.smtp.host","smtp.nauta.cu");
-                props.put("mail.smtp.port","25");
-                props.put("mail.smtp.auth","true");
-                props.put("mail.smtp.starttls.enable","false");
+                props.put("mail.smtp.host", "smtp.nauta.cu");
+                props.put("mail.smtp.port", "25");
+                props.put("mail.smtp.auth", "true");
+                props.put("mail.smtp.starttls.enable", "false");
+                Session session = Session.getInstance(props);
 
-                Session s = Session.getInstance(props);
-                MimeMessage msg = new MimeMessage(s);
+                MimeMessage msg = new MimeMessage(session);
+                SharedPreferences prefs = ctx.getSharedPreferences("prefs", Context.MODE_PRIVATE);
+                String email = prefs.getString("email", "");
+                String pass  = prefs.getString("pass", "");
                 msg.setFrom(new InternetAddress(email));
-                msg.setRecipient(RecipientType.TO,new InternetAddress(to));
+                msg.setRecipient(RecipientType.TO, new InternetAddress(m.toAddress));
                 msg.setSubject(TXT_SUBJ);
                 msg.setText(cipher);
 
-                Transport t = s.getTransport("smtp");
-                t.connect("smtp.nauta.cu",25,email,pass);
-                t.sendMessage(msg,msg.getAllRecipients());
-                t.close();
+                Transport tr = session.getTransport("smtp");
+                tr.connect("smtp.nauta.cu", 25, email, pass);
+                tr.sendMessage(msg, msg.getAllRecipients());
+                tr.close();
 
-                Message m = new Message();
-                m.fromAddress = email;
-                m.toAddress   = to;
-                m.subject     = TXT_SUBJ;
-                m.body        = plainBody;
-                m.attachmentPath = null;
-                m.timestamp   = System.currentTimeMillis();
-                m.sent        = true;
-                m.read        = true;
-                m.type        = "text";
-                AppDatabase.getInstance(ctx).messageDao().insert(m);
-
-                Log.d(TAG,"Texto enviado");
-            } catch(Exception e){
-                Log.e(TAG,"Error enviar texto",e);
+                m.sendState = Message.STATE_SENT;
+            } catch (Exception e) {
+                Log.e("MailHelper", "Error enviando texto", e);
+                m.sendState = Message.STATE_FAILED;
             }
-        }).start();
+
+            // 4) Actualizar estado en la BD
+            dao.update(m);
+        });
     }
 
-    public static void sendAudioEmail(Context ctx, String to, String audioPath) {
-        new Thread(() -> {
-            try {
-                SharedPreferences p = ctx.getSharedPreferences("prefs", Context.MODE_PRIVATE);
-                String email = p.getString("email",""), pass = p.getString("pass","");
-                if (email.isEmpty()||pass.isEmpty()) return;
+    public static void sendAudioEmail(Context ctx, Message m) {
+        Executors.newSingleThreadExecutor().execute(() -> {
+            MessageDao dao = AppDatabase.getInstance(ctx).messageDao();
 
-                File in  = new File(audioPath);
-                File tmp = File.createTempFile("aud_enc",".tmp",ctx.getCacheDir());
-                CryptoHelper.encryptAudio(in,tmp);
+            // 1) Insert inicial
+            long id = dao.insert(m);
+            m.id = (int) id;
+
+            // 2) Comprobar red
+            if (!hasNetwork(ctx)) {
+                m.sendState = Message.STATE_FAILED;
+                dao.update(m);
+                return;
+            }
+
+            // 3) Envío SMTP con adjunto
+            try {
+                File in  = new File(m.attachmentPath);
+                File tmp = File.createTempFile("aud_enc", ".tmp", ctx.getCacheDir());
+                CryptoHelper.encryptAudio(in, tmp);
 
                 Properties props = new Properties();
-                props.put("mail.smtp.host","smtp.nauta.cu");
-                props.put("mail.smtp.port","25");
-                props.put("mail.smtp.auth","true");
-                props.put("mail.smtp.starttls.enable","false");
+                props.put("mail.smtp.host", "smtp.nauta.cu");
+                props.put("mail.smtp.port", "25");
+                props.put("mail.smtp.auth", "true");
+                props.put("mail.smtp.starttls.enable", "false");
+                Session session = Session.getInstance(props);
 
-                Session s = Session.getInstance(props);
-                MimeMessage msg = new MimeMessage(s);
+                MimeMessage msg = new MimeMessage(session);
+                SharedPreferences prefs = ctx.getSharedPreferences("prefs", Context.MODE_PRIVATE);
+                String email = prefs.getString("email", "");
+                String pass  = prefs.getString("pass", "");
                 msg.setFrom(new InternetAddress(email));
-                msg.setRecipient(RecipientType.TO,new InternetAddress(to));
+                msg.setRecipient(RecipientType.TO, new InternetAddress(m.toAddress));
                 msg.setSubject(AUD_SUBJ);
 
-                MimeBodyPart text = new MimeBodyPart();
-                text.setText("[Audio]");
-                MimeBodyPart file = new MimeBodyPart();
-                FileDataSource fds = new FileDataSource(tmp);
-                file.setDataHandler(new DataHandler(fds));
-                file.setFileName("audio.enc");
-
+                MimeBodyPart textPart = new MimeBodyPart();
+                textPart.setText("[Audio]");
+                MimeBodyPart filePart = new MimeBodyPart();
+                filePart.setDataHandler(new DataHandler(new FileDataSource(tmp)));
+                filePart.setFileName("audio.enc");
                 Multipart mp = new MimeMultipart();
-                mp.addBodyPart(text);
-                mp.addBodyPart(file);
+                mp.addBodyPart(textPart);
+                mp.addBodyPart(filePart);
                 msg.setContent(mp);
 
-                Transport t = s.getTransport("smtp");
-                t.connect("smtp.nauta.cu",25,email,pass);
-                t.sendMessage(msg,msg.getAllRecipients());
-                t.close();
-
-                Message m = new Message();
-                m.fromAddress = email;
-                m.toAddress   = to;
-                m.subject     = AUD_SUBJ;
-                m.body        = "";
-                m.attachmentPath = audioPath;
-                m.timestamp   = System.currentTimeMillis();
-                m.sent        = true;
-                m.read        = true;
-                m.type        = "audio";
-                AppDatabase.getInstance(ctx).messageDao().insert(m);
-
+                Transport tr = session.getTransport("smtp");
+                tr.connect("smtp.nauta.cu", 25, email, pass);
+                tr.sendMessage(msg, msg.getAllRecipients());
+                tr.close();
                 tmp.delete();
-                Log.d(TAG,"Audio enviado");
-            } catch(Exception e){
-                Log.e(TAG,"Error enviar audio",e);
+
+                m.sendState = Message.STATE_SENT;
+            } catch (Exception e) {
+                Log.e("MailHelper", "Error enviando audio", e);
+                m.sendState = Message.STATE_FAILED;
             }
-        }).start();
+
+            // 4) Actualizar estado en la BD
+            dao.update(m);
+        });
+    }
+
+    private static boolean hasNetwork(Context ctx) {
+        ConnectivityManager cm = (ConnectivityManager)
+                ctx.getSystemService(Context.CONNECTIVITY_SERVICE);
+        NetworkInfo ni = cm.getActiveNetworkInfo();
+        return ni != null && ni.isConnected();
     }
 }

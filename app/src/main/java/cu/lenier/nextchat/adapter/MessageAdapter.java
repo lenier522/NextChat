@@ -1,98 +1,150 @@
 package cu.lenier.nextchat.adapter;
 
+import android.app.AlertDialog;
+import android.content.Context;
 import android.media.MediaPlayer;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageButton;
+import android.widget.ImageView;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
 
-import cu.lenier.nextchat.R;
-import cu.lenier.nextchat.model.Message;
-
-import java.io.IOException;
 import java.text.SimpleDateFormat;
-import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.Executors;
+
+import cu.lenier.nextchat.R;
+import cu.lenier.nextchat.data.AppDatabase;
+import cu.lenier.nextchat.data.MessageDao;
+import cu.lenier.nextchat.model.Message;
+import cu.lenier.nextchat.util.MailHelper;
 
 public class MessageAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
-    private static final int SENT_TEXT  = 1;
-    private static final int RECV_TEXT  = 2;
-    private static final int SENT_AUDIO = 3;
-    private static final int RECV_AUDIO = 4;
 
-    private List<Message> messages = new ArrayList<>();
+    private List<Message> messages;
 
-    public void setMessages(List<Message> m){
-        messages = m!=null?m:new ArrayList<>();
+    public void setMessages(List<Message> msgs) {
+        messages = msgs;
         notifyDataSetChanged();
     }
 
-    @Override public int getItemViewType(int pos){
+    @Override public int getItemViewType(int pos) {
         Message m = messages.get(pos);
-        boolean isAudio = "audio".equals(m.type);
-        return m.sent
-                ? isAudio?SENT_AUDIO:SENT_TEXT
-                : isAudio?RECV_AUDIO:RECV_TEXT;
+        if (m.sent) {
+            return "audio".equals(m.type) ? 2 : 1;
+        } else {
+            return "audio".equals(m.type) ? 4 : 3;
+        }
     }
 
     @NonNull @Override
-    public RecyclerView.ViewHolder onCreateViewHolder(@NonNull ViewGroup p,int vt){
+    public RecyclerView.ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
         int layout;
-        switch(vt){
-            case SENT_AUDIO:   layout=R.layout.item_message_audio_sent;    break;
-            case RECV_AUDIO:   layout=R.layout.item_message_audio_received;break;
-            case RECV_TEXT:    layout=R.layout.item_message_received;      break;
-            case SENT_TEXT:
-            default:           layout=R.layout.item_message_sent;          break;
+        switch (viewType) {
+            case 1: layout = R.layout.item_message_sent; break;
+            case 2: layout = R.layout.item_message_audio_sent; break;
+            case 3: layout = R.layout.item_message_received; break;
+            default: layout = R.layout.item_message_audio_received; break;
         }
-        View v = LayoutInflater.from(p.getContext()).inflate(layout,p,false);
-        return new VH(v,vt);
+        View v = LayoutInflater.from(parent.getContext()).inflate(layout, parent, false);
+        return new VH(v, viewType);
     }
 
-    @Override public void onBindViewHolder(@NonNull RecyclerView.ViewHolder h,int pos){
-        ((VH)h).bind(messages.get(pos));
+    @Override public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position) {
+        ((VH)holder).bind(messages.get(position));
     }
 
-    @Override public int getItemCount(){ return messages.size(); }
+    @Override public int getItemCount() {
+        return messages == null ? 0 : messages.size();
+    }
 
     class VH extends RecyclerView.ViewHolder {
         TextView tvBody, tvTime;
+        ImageView ivState;
         ImageButton btnPlay;
         int type;
 
-        VH(View v,int t){
-            super(v); type=t;
-            tvTime = v.findViewById(R.id.tvTime);
-            if(type==SENT_TEXT||type==RECV_TEXT){
-                tvBody = v.findViewById(R.id.tvBody);
+        VH(View itemView, int t) {
+            super(itemView);
+            type = t;
+            if (type == 1 || type == 3) {
+                tvBody = itemView.findViewById(R.id.tvBody);
             } else {
-                btnPlay = v.findViewById(R.id.btnPlay);
+                btnPlay = itemView.findViewById(R.id.btnPlay);
             }
+            tvTime = itemView.findViewById(R.id.tvTime);
+            ivState = itemView.findViewById(R.id.ivState);
+
+            itemView.setOnClickListener(view -> {
+                Message m = messages.get(getAdapterPosition());
+                Context ctx = view.getContext();
+                MessageDao dao = AppDatabase.getInstance(ctx).messageDao();
+                // Siempre permitir eliminar
+                if (m.sendState == Message.STATE_FAILED && m.sent) {
+                    // Failed: retry or delete
+                    new AlertDialog.Builder(ctx)
+                            .setTitle("Error al enviar")
+                            .setItems(new CharSequence[]{"Reintentar", "Eliminar"}, (dialog, which) -> {
+                                if (which == 0) {
+                                    // Retry in background
+                                    Executors.newSingleThreadExecutor().execute(() -> {
+                                        m.sendState = Message.STATE_PENDING;
+                                        dao.update(m);
+                                        if ("text".equals(m.type)) MailHelper.sendEmail(ctx, m);
+                                        else MailHelper.sendAudioEmail(ctx, m);
+                                    });
+                                } else {
+                                    // Delete in background
+                                    Executors.newSingleThreadExecutor().execute(() -> dao.deleteById(m.id));
+                                    Toast.makeText(ctx, "Mensaje eliminado", Toast.LENGTH_SHORT).show();
+                                }
+                            }).show();
+                } else {
+                    // Other states or received: delete only
+                    new AlertDialog.Builder(ctx)
+                            .setTitle("Eliminar mensaje")
+                            .setMessage("¿Eliminar este mensaje?")
+                            .setPositiveButton("Eliminar", (dlg, which) -> {
+                                Executors.newSingleThreadExecutor().execute(() -> dao.deleteById(m.id));
+                                Toast.makeText(ctx, "Mensaje eliminado", Toast.LENGTH_SHORT).show();
+                            })
+                            .setNegativeButton("Cancelar", null)
+                            .show();
+                }
+            });
         }
 
-        void bind(Message m){
-//            tvTime.setText(new SimpleDateFormat("HH:mm", Locale.getDefault())
-            tvTime.setText(new SimpleDateFormat("hh:mm a",Locale.getDefault())
-                    .format(new Date(m.timestamp)));
-            if(type==SENT_TEXT||type==RECV_TEXT){
+        void bind(Message m) {
+            if (type == 1 || type == 3) {
                 tvBody.setText(m.body);
             } else {
-                btnPlay.setOnClickListener(v->{
-                    MediaPlayer mp = new MediaPlayer();
-                    try{
+                btnPlay.setOnClickListener(v -> {
+                    try {
+                        MediaPlayer mp = new MediaPlayer();
                         mp.setDataSource(m.attachmentPath);
                         mp.prepare();
                         mp.start();
-                    } catch(IOException e){
-                        e.printStackTrace();
-                    }
+                    } catch (Exception ignored) {}
                 });
+            }
+            tvTime.setText(new SimpleDateFormat("hh:mm a", Locale.getDefault())
+                    .format(new Date(m.timestamp)));
+
+            if (ivState != null && m.sent) {
+                int res = R.mipmap.ic_state_failed;
+                if (m.sendState == Message.STATE_PENDING)     res = R.mipmap.ic_state_pending;
+                else if (m.sendState == Message.STATE_SENT)   res = R.mipmap.ic_state_sent;
+                ivState.setImageResource(res);
+                ivState.setVisibility(View.VISIBLE);
+            } else if (ivState != null) {
+                ivState.setVisibility(View.GONE);
             }
         }
     }

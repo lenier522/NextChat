@@ -2,8 +2,11 @@ package cu.lenier.nextchat.data;
 
 import androidx.lifecycle.LiveData;
 import androidx.room.Dao;
+import androidx.room.Delete;
 import androidx.room.Insert;
+import androidx.room.OnConflictStrategy;
 import androidx.room.Query;
+import androidx.room.Update;
 
 import java.util.List;
 
@@ -12,7 +15,17 @@ import cu.lenier.nextchat.model.UnreadCount;
 
 @Dao
 public interface MessageDao {
-    @Insert void insert(Message msg);
+    /** Inserta un nuevo mensaje y devuelve su ID */
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    long insert(Message msg);
+
+    /** Actualiza un mensaje existente (p. ej. para cambiar sendState) */
+    @Update
+    void update(Message msg);
+
+    /** Elimina un mensaje específico */
+    @Delete
+    void delete(Message msg);
 
     @Query("SELECT * FROM messages " +
             "WHERE subject IN ('NextChat','NextChat Audio') " +
@@ -42,4 +55,14 @@ public interface MessageDao {
             "WHERE subject IN ('NextChat','NextChat Audio') " +
             "  AND (fromAddress=:contact OR toAddress=:contact)")
     void deleteByContact(String contact);
+
+    @Query("DELETE FROM messages WHERE id = :id")
+    void deleteById(int id);
+    @Query("SELECT * FROM messages " +
+            "WHERE subject IN ('NextChat','NextChat Audio') " +
+            "  AND (fromAddress = :contact OR toAddress = :contact) " +
+            "ORDER BY timestamp DESC " +
+            "LIMIT 1")
+    Message getLastMessageSync(String contact);
+
 }

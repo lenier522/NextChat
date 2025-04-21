@@ -5,14 +5,20 @@ import androidx.room.PrimaryKey;
 
 @Entity(tableName = "messages")
 public class Message {
+    public static final int STATE_FAILED  = 0;
+    public static final int STATE_PENDING = 1;
+    public static final int STATE_SENT    = 2;
+
     @PrimaryKey(autoGenerate = true) public int id;
+
     public String fromAddress;
     public String toAddress;
-    public String subject;        // "NextChat" o "NextChat Audio"
-    public String body;           // texto plano
-    public String attachmentPath; // ruta local si es audio
-    public long timestamp;
-    public boolean sent;          // true si lo enviaste tú
-    public boolean read;          // true si ya lo leíste
-    public String type;           // "text" o "audio"
+    public String subject;
+    public String body;
+    public String attachmentPath;
+    public long   timestamp;
+    public boolean sent;      // true = este es tu mensaje
+    public boolean read;
+    public String  type;      // "text" o "audio"
+    public int     sendState; // 0=failed,1=pending,2=sent
 }

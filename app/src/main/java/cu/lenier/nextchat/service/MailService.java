@@ -1,15 +1,19 @@
 package cu.lenier.nextchat.service;
 
+import android.Manifest;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.Service;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.IBinder;
 import android.util.Log;
 
+import androidx.core.app.ActivityCompat;
 import androidx.core.app.NotificationCompat;
+import androidx.core.app.NotificationManagerCompat;
 
 import com.sun.mail.imap.IMAPFolder;
 
@@ -25,17 +29,20 @@ import javax.mail.Store;
 import javax.mail.event.MessageCountAdapter;
 import javax.mail.event.MessageCountEvent;
 
+import cu.lenier.nextchat.R;
 import cu.lenier.nextchat.data.AppDatabase;
 import cu.lenier.nextchat.data.MessageDao;
 import cu.lenier.nextchat.model.Message;
 import cu.lenier.nextchat.util.CryptoHelper;
 
 public class MailService extends Service {
-    private static final String TAG      = "MailService";
-    private static final String TXT_SUBJ = "NextChat";
-    private static final String AUD_SUBJ = "NextChat Audio";
-    private static final String CHAN_ID  = "MailSyncChannel";
-    private static final int    NOTIF_ID = 1;
+    private static final String TAG             = "MailService";
+    private static final String TXT_SUBJ        = "NextChat";
+    private static final String AUD_SUBJ        = "NextChat Audio";
+    private static final String CHANNEL_SYNC    = "MailSyncChannel";
+    private static final String CHANNEL_NEWMSG  = "NewMsgChannel";
+    private static final int    NOTIF_ID_SYNC   = 1;
+    private static final int    NOTIF_ID_MESSAGE = 2;
 
     private MessageDao dao;
     private Session    session;
@@ -46,34 +53,44 @@ public class MailService extends Service {
         super.onCreate();
         dao = AppDatabase.getInstance(this).messageDao();
 
-        // Configuración IMAP
+        // IMAP config
         Properties props = new Properties();
         props.put("mail.imap.host", "imap.nauta.cu");
         props.put("mail.imap.port", "143");
         props.put("mail.imap.ssl.enable", "false");
         session = Session.getInstance(props);
 
-        // Canal de notificación (Android O+)
+        // Crear canales de notificación
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            NotificationChannel chan = new NotificationChannel(
-                    CHAN_ID, "NextChat Sync", NotificationManager.IMPORTANCE_LOW
+            NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+            NotificationChannel syncChannel = new NotificationChannel(
+                    CHANNEL_SYNC,
+                    "NextChat Sync",
+                    NotificationManager.IMPORTANCE_LOW
             );
-            chan.setDescription("Sincronización de correo IMAP");
-            ((NotificationManager)getSystemService(NOTIFICATION_SERVICE))
-                    .createNotificationChannel(chan);
+            syncChannel.setDescription("Sincronización de correo IMAP");
+            nm.createNotificationChannel(syncChannel);
+
+            NotificationChannel msgChannel = new NotificationChannel(
+                    CHANNEL_NEWMSG,
+                    "Notificaciones de NextChat",
+                    NotificationManager.IMPORTANCE_DEFAULT
+            );
+            msgChannel.setDescription("Alertas de nuevos mensajes");
+            nm.createNotificationChannel(msgChannel);
         }
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        // Crear y mostrar notificación en primer plano
-        Notification notif = new NotificationCompat.Builder(this, CHAN_ID)
+        // Notificación foreground para mantener vivo el servicio
+        Notification notif = new NotificationCompat.Builder(this, CHANNEL_SYNC)
                 .setContentTitle("NextChat")
                 .setContentText("Sincronizando mensajes…")
                 .setSmallIcon(android.R.drawable.ic_popup_sync)
                 .setOngoing(true)
                 .build();
-        startForeground(NOTIF_ID, notif);
+        startForeground(NOTIF_ID_SYNC, notif);
 
         // Iniciar polling sólo una vez
         if (!pollingStarted) {
@@ -86,10 +103,8 @@ public class MailService extends Service {
 
     private void pollLoop() {
         try {
-            String email = getSharedPreferences("prefs", MODE_PRIVATE)
-                    .getString("email", "");
-            String pass  = getSharedPreferences("prefs", MODE_PRIVATE)
-                    .getString("pass", "");
+            String email = getSharedPreferences("prefs", MODE_PRIVATE).getString("email", "");
+            String pass  = getSharedPreferences("prefs", MODE_PRIVATE).getString("pass", "");
 
             Store store = session.getStore("imap");
             store.connect("imap.nauta.cu", 143, email, pass);
@@ -119,27 +134,24 @@ public class MailService extends Service {
             String subj = m.getSubject();
             if (!TXT_SUBJ.equals(subj) && !AUD_SUBJ.equals(subj)) return;
 
-            String me = getSharedPreferences("prefs", MODE_PRIVATE)
-                    .getString("email", "");
-
+            String me = getSharedPreferences("prefs", MODE_PRIVATE).getString("email", "");
             Message msg = new Message();
             msg.fromAddress    = m.getFrom()[0].toString();
             msg.toAddress      = me;
             msg.subject        = subj;
             msg.timestamp      = m.getReceivedDate().getTime();
-            msg.read           = false;
             msg.sent           = false;
+            msg.read           = false;
 
             Object content = m.getContent();
             if (TXT_SUBJ.equals(subj) && !(content instanceof javax.mail.Multipart)) {
+                msg.type           = "text";
                 msg.body           = CryptoHelper.decrypt(content.toString());
                 msg.attachmentPath = null;
-                msg.type           = "text";
-
             } else if (AUD_SUBJ.equals(subj) && content instanceof javax.mail.Multipart) {
-                javax.mail.Multipart mp = (javax.mail.Multipart) content;
-                msg.body = "";
                 msg.type = "audio";
+                msg.body = "";
+                javax.mail.Multipart mp = (javax.mail.Multipart) content;
                 for (int i = 0; i < mp.getCount(); i++) {
                     Part part = mp.getBodyPart(i);
                     if (Part.ATTACHMENT.equalsIgnoreCase(part.getDisposition())) {
@@ -148,8 +160,7 @@ public class MailService extends Service {
                         File enc = new File(dir, System.currentTimeMillis() + "_" + part.getFileName());
                         try (InputStream is = part.getInputStream();
                              FileOutputStream fos = new FileOutputStream(enc)) {
-                            byte[] buf = new byte[4096];
-                            int r;
+                            byte[] buf = new byte[4096]; int r;
                             while ((r = is.read(buf)) > 0) fos.write(buf, 0, r);
                         }
                         File dec = new File(dir, enc.getName().replace(".enc", ".3gp"));
@@ -162,7 +173,24 @@ public class MailService extends Service {
             }
 
             dao.insert(msg);
-            Log.d(TAG, "Incoming " + msg.type + " from " + msg.fromAddress);
+            // Lanzar notificación de mensaje nuevo
+            NotificationCompat.Builder nb = new NotificationCompat.Builder(this, CHANNEL_NEWMSG)
+                    .setContentTitle("Mensaje de " + msg.fromAddress)
+                    .setContentText(msg.type.equals("text") ? msg.body : "Audio recibido")
+                    .setSmallIcon(R.drawable.ic_notification)
+                    .setAutoCancel(true)
+                    .setPriority(NotificationCompat.PRIORITY_DEFAULT);
+            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                // TODO: Consider calling
+                //    ActivityCompat#requestPermissions
+                // here to request the missing permissions, and then overriding
+                //   public void onRequestPermissionsResult(int requestCode, String[] permissions,
+                //                                          int[] grantResults)
+                // to handle the case where the user grants the permission. See the documentation
+                // for ActivityCompat#requestPermissions for more details.
+                return;
+            }
+            NotificationManagerCompat.from(this).notify((int) msg.timestamp, nb.build());
 
         } catch (Exception e) {
             Log.e(TAG, "handleIncoming error", e);
