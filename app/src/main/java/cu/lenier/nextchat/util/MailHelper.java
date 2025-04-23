@@ -6,15 +6,19 @@ import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.util.Log;
 
+import com.sun.mail.imap.IMAPFolder;
+
 import java.io.File;
+import java.io.FileWriter;
+import java.io.Writer;
 import java.util.Properties;
 import java.util.concurrent.Executors;
 
-import javax.activation.DataHandler;
-import javax.activation.FileDataSource;
+import javax.mail.Folder;
 import javax.mail.Message.RecipientType;
 import javax.mail.Multipart;
 import javax.mail.Session;
+import javax.mail.Store;
 import javax.mail.Transport;
 import javax.mail.internet.InternetAddress;
 import javax.mail.internet.MimeBodyPart;
@@ -26,28 +30,35 @@ import cu.lenier.nextchat.data.MessageDao;
 import cu.lenier.nextchat.model.Message;
 
 public class MailHelper {
-    private static final String TXT_SUBJ = "NextChat";
-    private static final String AUD_SUBJ = "NextChat Audio";
+    private static final String TAG       = "MailHelper";
+    private static final String TXT_SUBJ  = "NextChat";
+    private static final String AUD_SUBJ  = "NextChat Audio";
+    private static final String FOLDER    = "NextChat";
 
     public static void sendEmail(Context ctx, Message m) {
-        // Ejecutamos TODO en background
         Executors.newSingleThreadExecutor().execute(() -> {
             MessageDao dao = AppDatabase.getInstance(ctx).messageDao();
 
-            // 1) Insert inicial
-            long id = dao.insert(m);
-            m.id = (int) id;
+            // insert or update local DB
+            if (m.id == 0) {
+                long newId = dao.insert(m);
+                m.id = (int) newId;
+            } else {
+                dao.update(m);
+            }
 
-            // 2) Comprobar red
+            // no network -> fail fast
             if (!hasNetwork(ctx)) {
                 m.sendState = Message.STATE_FAILED;
                 dao.update(m);
                 return;
             }
 
-            // 3) Intentar envío SMTP
             try {
+                // encrypt
                 String cipher = CryptoHelper.encrypt(m.body);
+
+                // SMTP session
                 Properties props = new Properties();
                 props.put("mail.smtp.host", "smtp.nauta.cu");
                 props.put("mail.smtp.port", "25");
@@ -55,27 +66,31 @@ public class MailHelper {
                 props.put("mail.smtp.starttls.enable", "false");
                 Session session = Session.getInstance(props);
 
-                MimeMessage msg = new MimeMessage(session);
+                // build MIME
+                MimeMessage mime = new MimeMessage(session);
                 SharedPreferences prefs = ctx.getSharedPreferences("prefs", Context.MODE_PRIVATE);
                 String email = prefs.getString("email", "");
                 String pass  = prefs.getString("pass", "");
-                msg.setFrom(new InternetAddress(email));
-                msg.setRecipient(RecipientType.TO, new InternetAddress(m.toAddress));
-                msg.setSubject(TXT_SUBJ);
-                msg.setText(cipher);
+                mime.setFrom(new InternetAddress(email));
+                mime.setRecipient(RecipientType.TO, new InternetAddress(m.toAddress));
+                mime.setSubject(TXT_SUBJ);
+                mime.setText(cipher);
 
+                // send
                 Transport tr = session.getTransport("smtp");
                 tr.connect("smtp.nauta.cu", 25, email, pass);
-                tr.sendMessage(msg, msg.getAllRecipients());
+                tr.sendMessage(mime, mime.getAllRecipients());
                 tr.close();
+
+                // append to NextChat IMAP folder
+                appendToFolder(session, email, pass, mime);
 
                 m.sendState = Message.STATE_SENT;
             } catch (Exception e) {
-                Log.e("MailHelper", "Error enviando texto", e);
+                Log.e(TAG, "Error enviando texto", e);
                 m.sendState = Message.STATE_FAILED;
             }
 
-            // 4) Actualizar estado en la BD
             dao.update(m);
         });
     }
@@ -84,23 +99,26 @@ public class MailHelper {
         Executors.newSingleThreadExecutor().execute(() -> {
             MessageDao dao = AppDatabase.getInstance(ctx).messageDao();
 
-            // 1) Insert inicial
-            long id = dao.insert(m);
-            m.id = (int) id;
+            if (m.id == 0) {
+                long newId = dao.insert(m);
+                m.id = (int) newId;
+            } else {
+                dao.update(m);
+            }
 
-            // 2) Comprobar red
             if (!hasNetwork(ctx)) {
                 m.sendState = Message.STATE_FAILED;
                 dao.update(m);
                 return;
             }
 
-            // 3) Envío SMTP con adjunto
             try {
+                // encrypt audio to temp
                 File in  = new File(m.attachmentPath);
                 File tmp = File.createTempFile("aud_enc", ".tmp", ctx.getCacheDir());
                 CryptoHelper.encryptAudio(in, tmp);
 
+                // SMTP session
                 Properties props = new Properties();
                 props.put("mail.smtp.host", "smtp.nauta.cu");
                 props.put("mail.smtp.port", "25");
@@ -108,39 +126,62 @@ public class MailHelper {
                 props.put("mail.smtp.starttls.enable", "false");
                 Session session = Session.getInstance(props);
 
-                MimeMessage msg = new MimeMessage(session);
+                MimeMessage mime = new MimeMessage(session);
                 SharedPreferences prefs = ctx.getSharedPreferences("prefs", Context.MODE_PRIVATE);
                 String email = prefs.getString("email", "");
                 String pass  = prefs.getString("pass", "");
-                msg.setFrom(new InternetAddress(email));
-                msg.setRecipient(RecipientType.TO, new InternetAddress(m.toAddress));
-                msg.setSubject(AUD_SUBJ);
+                mime.setFrom(new InternetAddress(email));
+                mime.setRecipient(RecipientType.TO, new InternetAddress(m.toAddress));
+                mime.setSubject(AUD_SUBJ);
 
+                // build multipart
                 MimeBodyPart textPart = new MimeBodyPart();
                 textPart.setText("[Audio]");
                 MimeBodyPart filePart = new MimeBodyPart();
-                filePart.setDataHandler(new DataHandler(new FileDataSource(tmp)));
+                filePart.attachFile(tmp);
                 filePart.setFileName("audio.enc");
                 Multipart mp = new MimeMultipart();
                 mp.addBodyPart(textPart);
                 mp.addBodyPart(filePart);
-                msg.setContent(mp);
+                mime.setContent(mp);
 
+                // send
                 Transport tr = session.getTransport("smtp");
                 tr.connect("smtp.nauta.cu", 25, email, pass);
-                tr.sendMessage(msg, msg.getAllRecipients());
+                tr.sendMessage(mime, mime.getAllRecipients());
                 tr.close();
-                tmp.delete();
 
+                // append to NextChat folder
+                appendToFolder(session, email, pass, mime);
+
+                // clean
+                tmp.delete();
                 m.sendState = Message.STATE_SENT;
             } catch (Exception e) {
-                Log.e("MailHelper", "Error enviando audio", e);
+                Log.e(TAG, "Error enviando audio", e);
                 m.sendState = Message.STATE_FAILED;
             }
 
-            // 4) Actualizar estado en la BD
             dao.update(m);
         });
+    }
+
+    /** Appends the given MimeMessage to the IMAP folder "NextChat" */
+    private static void appendToFolder(Session session, String user, String pass, MimeMessage mime) {
+        try {
+            Store store = session.getStore("imap");
+            store.connect("imap.nauta.cu", 143, user, pass);
+            IMAPFolder folder = (IMAPFolder) store.getFolder(FOLDER);
+            if (!folder.exists()) {
+                folder.create(Folder.HOLDS_MESSAGES);
+            }
+            folder.open(Folder.READ_WRITE);
+            folder.appendMessages(new javax.mail.Message[]{ mime });
+            folder.close(false);
+            store.close();
+        } catch (Exception e) {
+            Log.e(TAG, "Error appending to folder NextChat", e);
+        }
     }
 
     private static boolean hasNetwork(Context ctx) {

@@ -49,6 +49,8 @@ dependencies {
     implementation(libs.room.runtime)
     implementation(libs.lifecycle.extensions)
     implementation(libs.work.runtime)
+    implementation(libs.core)
+    implementation(libs.legacy.support.core.utils)
     annotationProcessor(libs.room.compiler)
     testImplementation(libs.junit)
     androidTestImplementation(libs.ext.junit)

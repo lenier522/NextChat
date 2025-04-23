@@ -1,6 +1,5 @@
 package cu.lenier.nextchat.ui;
 
-import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.net.ConnectivityManager;
@@ -30,9 +29,11 @@ import java.util.concurrent.Executors;
 
 import cu.lenier.nextchat.R;
 import cu.lenier.nextchat.adapter.ChatListAdapter;
+import cu.lenier.nextchat.config.AppConfig;
 import cu.lenier.nextchat.data.AppDatabase;
 import cu.lenier.nextchat.model.Message;
 import cu.lenier.nextchat.model.UnreadCount;
+import cu.lenier.nextchat.work.MailSyncWorker;
 
 public class ChatListActivity extends AppCompatActivity {
     private ChatListAdapter adapter;
@@ -40,19 +41,27 @@ public class ChatListActivity extends AppCompatActivity {
     private Toolbar toolbar;
     private ConnectivityManager.NetworkCallback netCallback;
     private ConnectivityManager cm;
-    private Handler handler = new Handler();
+
+    // **Esto**: handler para disparar sync periódica
+    private final Handler syncHandler = new Handler();
+    private final Runnable syncRunnable = new Runnable() {
+        @Override public void run() {
+            // fuerza al Worker a sincronizar YA
+            MailSyncWorker.forceSyncNow(ChatListActivity.this);
+            // reprograma en 5 segundos
+            syncHandler.postDelayed(this, 5_000);
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_chat_list);
 
-        // 1) Toolbar inicial
         toolbar = findViewById(R.id.toolbar);
         setSupportActionBar(toolbar);
         toolbar.setTitle("Esperando conexión...");
 
-        // 2) RecyclerView + Adapter
         RecyclerView rv = findViewById(R.id.rvChats);
         rv.setLayoutManager(new LinearLayoutManager(this));
         adapter = new ChatListAdapter();
@@ -60,7 +69,6 @@ public class ChatListActivity extends AppCompatActivity {
         adapter.setOnItemLongClickListener(this::confirmDelete);
         rv.setAdapter(adapter);
 
-        // 3) FAB para nuevo chat
         FloatingActionButton fab = findViewById(R.id.fabNewChat);
         fab.setOnClickListener(v -> {
             EditText input = new EditText(this);
@@ -81,24 +89,18 @@ public class ChatListActivity extends AppCompatActivity {
                     .show();
         });
 
-        // 4) Observers de Room
         AppDatabase db = AppDatabase.getInstance(this);
         db.messageDao().getContacts().observe(this, contacts -> {
             adapter.setContacts(contacts);
             toolbar.setTitle(getString(R.string.app_name));
-            // Para cada contacto, cargar último mensaje
             Executors.newSingleThreadExecutor().execute(() -> {
                 Map<String,String> previews = new HashMap<>();
                 Map<String,Long>   times    = new HashMap<>();
                 for (String c : contacts) {
                     Message last = db.messageDao().getLastMessageSync(c);
                     if (last != null) {
-                        previews.put(
-                                c,
-                                last.type.equals("text")
-                                        ? last.body
-                                        : "Audio"
-                        );
+                        previews.put(c,
+                                last.type.equals("text") ? last.body : "Audio");
                         times.put(c, last.timestamp);
                     }
                 }
@@ -109,51 +111,53 @@ public class ChatListActivity extends AppCompatActivity {
             });
         });
 
-
-        AppDatabase.getInstance(this)
-                .messageDao()
-                .getUnreadCounts()
-                .observe(this, (Observer<List<UnreadCount>>) list -> {
+        db.messageDao().getUnreadCounts()
+                .observe(this,(Observer<List<UnreadCount>>) list -> {
                     unreadMap.clear();
-                    for (UnreadCount uc : list) {
-                        unreadMap.put(uc.contact, uc.unread);
-                    }
+                    for (UnreadCount uc : list) unreadMap.put(uc.contact, uc.unread);
                     adapter.setUnreadMap(unreadMap);
                 });
 
-        // 5) NetworkCallback para estados de toolbar
-        cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+        cm = (ConnectivityManager) getSystemService(ConnectivityManager.class);
         netCallback = new ConnectivityManager.NetworkCallback() {
-            @Override
-            public void onAvailable(@NonNull Network network) {
-                handler.post(() -> {
+            @Override public void onAvailable(@NonNull Network network) {
+                syncHandler.post(() -> {
                     toolbar.setTitle("Conectando...");
                     Executors.newSingleThreadExecutor().execute(() -> {
                         boolean ok = hasInternetAccess();
-                        handler.post(() -> {
+                        syncHandler.post(() -> {
                             if (ok) {
                                 toolbar.setTitle("Actualizando...");
-                                // Tras 2s volvemos al nombre de la app
-                                handler.postDelayed(() ->
+                                syncHandler.postDelayed(() ->
                                         toolbar.setTitle(getString(R.string.app_name)), 2000);
                             } else {
-                                // Sin internet aún
                                 toolbar.setTitle("Conectando...");
                             }
                         });
                     });
                 });
             }
-            @Override
-            public void onLost(@NonNull Network network) {
-                handler.post(() -> toolbar.setTitle("Esperando conexión..."));
+            @Override public void onLost(@NonNull Network network) {
+                syncHandler.post(() -> toolbar.setTitle("Esperando conexión..."));
             }
         };
         cm.registerDefaultNetworkCallback(netCallback);
     }
 
+    @Override protected void onResume() {
+        super.onResume();
+        // arranco el loop de sync
+        syncHandler.post(syncRunnable);
+    }
+    @Override protected void onPause() {
+        super.onPause();
+        // paro el loop
+        syncHandler.removeCallbacks(syncRunnable);
+    }
+
+
     private void openChat(String contact) {
-        // Marcar como leídos en background
+        // marcar como leídos
         String me = getSharedPreferences("prefs", MODE_PRIVATE)
                 .getString("email", "");
         Executors.newSingleThreadExecutor().execute(() ->
@@ -162,16 +166,17 @@ public class ChatListActivity extends AppCompatActivity {
                         .markAsRead(contact, me)
         );
 
+        // limpiar currentChat y abrir chat
+        AppConfig.setCurrentChat(null);
         startActivity(new Intent(this, ChatActivity.class)
                 .putExtra("contact", contact));
     }
 
     private void confirmDelete(String contact) {
-        // Mostramos diálogo de confirmación
         new AlertDialog.Builder(this)
                 .setTitle("Eliminar chat")
                 .setMessage("¿Eliminar toda la conversación con " + contact + "?")
-                .setPositiveButton("Eliminar", (DialogInterface d, int which) -> {
+                .setPositiveButton("Eliminar", (d, w) -> {
                     Executors.newSingleThreadExecutor().execute(() ->
                             AppDatabase.getInstance(this)
                                     .messageDao()
@@ -182,7 +187,6 @@ public class ChatListActivity extends AppCompatActivity {
                 .show();
     }
 
-    /** Comprueba internet rápido contra un endpoint ligero */
     private boolean hasInternetAccess() {
         try {
             HttpURLConnection conn = (HttpURLConnection)
@@ -200,7 +204,7 @@ public class ChatListActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        handler.removeCallbacksAndMessages(null);
+        syncHandler.removeCallbacksAndMessages(null);
         if (cm != null && netCallback != null) {
             cm.unregisterNetworkCallback(netCallback);
         }

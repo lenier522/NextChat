@@ -1,3 +1,4 @@
+// src/main/java/cu/lenier/nextchat/ui/LoginActivity.java
 package cu.lenier.nextchat.ui;
 
 import android.app.ProgressDialog;
@@ -18,6 +19,7 @@ import android.widget.Toast;
 
 import java.util.Properties;
 
+import javax.mail.Folder;
 import javax.mail.Session;
 import javax.mail.Store;
 
@@ -27,35 +29,37 @@ import cu.lenier.nextchat.util.PermissionHelper;
 import cu.lenier.nextchat.work.MailSyncWorker;
 
 public class LoginActivity extends AppCompatActivity {
-    private EditText etEmail, etPass;
-    private Button   btnLogin;
+    private EditText     etEmail, etPass;
+    private Button       btnLogin;
     private ProgressDialog pd;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
+        // 1) Si ya hay credenciales, saltar al chat
         SharedPreferences prefs = getSharedPreferences("prefs", MODE_PRIVATE);
-        String e = prefs.getString("email", "");
-        String p = prefs.getString("pass", "");
-        if (!e.isEmpty() && !p.isEmpty()) {
+        String savedEmail = prefs.getString("email", "");
+        String savedPass  = prefs.getString("pass", "");
+        if (!savedEmail.isEmpty() && !savedPass.isEmpty()) {
             startMailService();
+            MailSyncWorker.schedulePeriodicSync(this);
             startActivity(new Intent(this, ChatListActivity.class));
             finish();
             return;
         }
 
-        // 1) Pedir permisos al arrancar si faltan
+        // 2) Pedir permisos de mic y notificaciones
         PermissionHelper.requestPermissionsIfNeeded(this);
 
-
         setContentView(R.layout.activity_login);
-        etEmail = findViewById(R.id.etEmail);
-        etPass  = findViewById(R.id.etPass);
-        btnLogin= findViewById(R.id.btnLogin);
+        etEmail  = findViewById(R.id.etEmail);
+        etPass   = findViewById(R.id.etPass);
+        btnLogin = findViewById(R.id.btnLogin);
+
         pd = new ProgressDialog(this);
         pd.setTitle("Iniciando sesión");
-        pd.setMessage("Verificando…");
+        pd.setMessage("Verificando credenciales…");
         pd.setCancelable(false);
 
         btnLogin.setOnClickListener(v -> attemptLogin());
@@ -66,7 +70,6 @@ public class LoginActivity extends AppCompatActivity {
                                            @NonNull String[] permissions,
                                            @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-
         if (requestCode == PermissionHelper.REQ_PERMS) {
             boolean allGranted = true;
             for (int res : grantResults) {
@@ -76,47 +79,54 @@ public class LoginActivity extends AppCompatActivity {
                 }
             }
             if (!allGranted) {
-                // Si el usuario denegó alguno, puedes informarle:
                 Toast.makeText(this,
-                        "Necesitamos esos permisos para enviar audio y notificaciones",
+                        "Necesitamos permisos de micrófono y notificaciones",
                         Toast.LENGTH_LONG).show();
-                // Y volver a pedirlos, o bien deshabilitar la función:
                 PermissionHelper.requestPermissionsIfNeeded(this);
             }
         }
     }
 
-
     private void attemptLogin() {
         String email = etEmail.getText().toString().trim();
         String pass  = etPass.getText().toString().trim();
         if (email.isEmpty() || pass.isEmpty()) {
-            showError("Complete ambos campos");
+            showError("Por favor completa ambos campos");
             return;
         }
         btnLogin.setEnabled(false);
         pd.show();
 
         new Thread(() -> {
+            Store store = null;
             try {
+                // 1) Conectar IMAP
                 Properties props = new Properties();
                 props.put("mail.store.protocol", "imap");
                 props.put("mail.imap.host", "imap.nauta.cu");
                 props.put("mail.imap.port", "143");
                 props.put("mail.imap.ssl.enable", "false");
                 Session sess = Session.getInstance(props);
-                Store store = sess.getStore("imap");
-                store.connect(email, pass);
-                store.close();
+                store = sess.getStore("imap");
+                store.connect("imap.nauta.cu", 143, email, pass);
 
+                // 2) Guardar credenciales
                 SharedPreferences prefs = getSharedPreferences("prefs", MODE_PRIVATE);
                 prefs.edit()
                         .putString("email", email)
                         .putString("pass", pass)
                         .apply();
 
+                // 3) Crear carpeta NextChat (subcarpeta de INBOX)
+                Folder inbox    = store.getFolder("INBOX");
+                Folder nextChat = inbox.getFolder("NextChat");
+                if (!nextChat.exists()) {
+                    nextChat.create(Folder.HOLDS_MESSAGES);
+                }
+
                 runOnUiThread(() -> {
                     pd.dismiss();
+                    // 4) Arrancar servicio + worker
                     startMailService();
                     MailSyncWorker.schedulePeriodicSync(this);
                     startActivity(new Intent(this, ChatListActivity.class));
@@ -127,8 +137,12 @@ public class LoginActivity extends AppCompatActivity {
                 runOnUiThread(() -> {
                     pd.dismiss();
                     btnLogin.setEnabled(true);
-                    showError("Autenticación fallida");
+                    showError("Autenticación fallida: revisa tus credenciales");
                 });
+            } finally {
+                try {
+                    if (store != null && store.isConnected()) store.close();
+                } catch (Exception ignored) {}
             }
         }).start();
     }

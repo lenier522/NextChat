@@ -48,17 +48,17 @@ public class MessageAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
     public RecyclerView.ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
         int layout;
         switch (viewType) {
-            case 1: layout = R.layout.item_message_sent; break;
-            case 2: layout = R.layout.item_message_audio_sent; break;
-            case 3: layout = R.layout.item_message_received; break;
-            default: layout = R.layout.item_message_audio_received; break;
+            case 1: layout = R.layout.item_message_sent;            break;
+            case 2: layout = R.layout.item_message_audio_sent;      break;
+            case 3: layout = R.layout.item_message_received;        break;
+            default:layout = R.layout.item_message_audio_received;  break;
         }
         View v = LayoutInflater.from(parent.getContext()).inflate(layout, parent, false);
         return new VH(v, viewType);
     }
 
-    @Override public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position) {
-        ((VH)holder).bind(messages.get(position));
+    @Override public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int pos) {
+        ((VH)holder).bind(messages.get(pos));
     }
 
     @Override public int getItemCount() {
@@ -79,21 +79,19 @@ public class MessageAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
             } else {
                 btnPlay = itemView.findViewById(R.id.btnPlay);
             }
-            tvTime = itemView.findViewById(R.id.tvTime);
+            tvTime  = itemView.findViewById(R.id.tvTime);
             ivState = itemView.findViewById(R.id.ivState);
 
             itemView.setOnClickListener(view -> {
                 Message m = messages.get(getAdapterPosition());
+                MessageDao dao = AppDatabase.getInstance(view.getContext()).messageDao();
                 Context ctx = view.getContext();
-                MessageDao dao = AppDatabase.getInstance(ctx).messageDao();
-                // Siempre permitir eliminar
-                if (m.sendState == Message.STATE_FAILED && m.sent) {
-                    // Failed: retry or delete
+
+                if (m.sent && m.sendState == Message.STATE_FAILED) {
                     new AlertDialog.Builder(ctx)
                             .setTitle("Error al enviar")
-                            .setItems(new CharSequence[]{"Reintentar", "Eliminar"}, (dialog, which) -> {
+                            .setItems(new CharSequence[]{"Reintentar","Eliminar"}, (d, which) -> {
                                 if (which == 0) {
-                                    // Retry in background
                                     Executors.newSingleThreadExecutor().execute(() -> {
                                         m.sendState = Message.STATE_PENDING;
                                         dao.update(m);
@@ -101,19 +99,21 @@ public class MessageAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
                                         else MailHelper.sendAudioEmail(ctx, m);
                                     });
                                 } else {
-                                    // Delete in background
-                                    Executors.newSingleThreadExecutor().execute(() -> dao.deleteById(m.id));
-                                    Toast.makeText(ctx, "Mensaje eliminado", Toast.LENGTH_SHORT).show();
+                                    Executors.newSingleThreadExecutor().execute(() ->
+                                            dao.deleteById(m.id)
+                                    );
+                                    Toast.makeText(ctx,"Mensaje eliminado",Toast.LENGTH_SHORT).show();
                                 }
                             }).show();
                 } else {
-                    // Other states or received: delete only
                     new AlertDialog.Builder(ctx)
                             .setTitle("Eliminar mensaje")
                             .setMessage("¿Eliminar este mensaje?")
-                            .setPositiveButton("Eliminar", (dlg, which) -> {
-                                Executors.newSingleThreadExecutor().execute(() -> dao.deleteById(m.id));
-                                Toast.makeText(ctx, "Mensaje eliminado", Toast.LENGTH_SHORT).show();
+                            .setPositiveButton("Eliminar", (d, w) -> {
+                                Executors.newSingleThreadExecutor().execute(() ->
+                                        dao.deleteById(m.id)
+                                );
+                                Toast.makeText(ctx,"Mensaje eliminado",Toast.LENGTH_SHORT).show();
                             })
                             .setNegativeButton("Cancelar", null)
                             .show();
@@ -139,8 +139,8 @@ public class MessageAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
 
             if (ivState != null && m.sent) {
                 int res = R.mipmap.ic_state_failed;
-                if (m.sendState == Message.STATE_PENDING)     res = R.mipmap.ic_state_pending;
-                else if (m.sendState == Message.STATE_SENT)   res = R.mipmap.ic_state_sent;
+                if (m.sendState == Message.STATE_PENDING) res = R.mipmap.ic_state_pending;
+                else if (m.sendState == Message.STATE_SENT) res = R.mipmap.ic_state_sent;
                 ivState.setImageResource(res);
                 ivState.setVisibility(View.VISIBLE);
             } else if (ivState != null) {

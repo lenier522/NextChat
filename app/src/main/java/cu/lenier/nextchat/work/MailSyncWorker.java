@@ -5,11 +5,13 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.util.Log;
 
+import androidx.annotation.NonNull;
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.NotificationManagerCompat;
 import androidx.work.Constraints;
 import androidx.work.ExistingPeriodicWorkPolicy;
 import androidx.work.NetworkType;
+import androidx.work.OneTimeWorkRequest;
 import androidx.work.PeriodicWorkRequest;
 import androidx.work.WorkManager;
 import androidx.work.Worker;
@@ -42,8 +44,8 @@ public class MailSyncWorker extends Worker {
     private static final String AUD_SUBJ      = "NextChat Audio";
     private static final String NOTIF_CHANNEL = "NewMsgChannel";
 
-    public MailSyncWorker(Context context, WorkerParameters params) {
-        super(context, params);
+    public MailSyncWorker(@NonNull Context ctx, @NonNull WorkerParameters params) {
+        super(ctx, params);
     }
 
     @Override
@@ -161,5 +163,10 @@ public class MailSyncWorker extends Worker {
                         ExistingPeriodicWorkPolicy.KEEP,
                         req
                 );
+    }
+    /** Fuerza un disparo inmediato del worker. */
+    public static void forceSyncNow(Context ctx) {
+        OneTimeWorkRequest req = new OneTimeWorkRequest.Builder(MailSyncWorker.class).build();
+        WorkManager.getInstance(ctx).enqueue(req);
     }
 }

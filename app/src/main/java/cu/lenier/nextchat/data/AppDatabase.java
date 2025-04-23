@@ -17,8 +17,8 @@ public abstract class AppDatabase extends RoomDatabase {
 
     private static volatile AppDatabase INSTANCE;
 
-    // Migration de v2 → v3: añadimos attachmentPath, type y sendState
-    private static final Migration MIGRATION_2_3 = new Migration(1, 3) {
+    // Migration de v1 → v3: añadimos attachmentPath, type y sendState
+    private static final Migration MIGRATION_1_3 = new Migration(1, 3) {
         @Override public void migrate(@NonNull SupportSQLiteDatabase db) {
             db.execSQL("ALTER TABLE messages ADD COLUMN attachmentPath TEXT");
             db.execSQL("ALTER TABLE messages ADD COLUMN type TEXT NOT NULL DEFAULT 'text'");
@@ -35,7 +35,7 @@ public abstract class AppDatabase extends RoomDatabase {
                                     AppDatabase.class,
                                     "mailchat_db"
                             )
-                            .addMigrations(MIGRATION_2_3)
+                            .addMigrations(MIGRATION_1_3)
                             .build();
                 }
             }
