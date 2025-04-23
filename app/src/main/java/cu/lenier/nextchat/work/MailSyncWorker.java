@@ -120,6 +120,10 @@ public class MailSyncWorker extends Worker {
                 } else {
                     continue;
                 }
+                // SALTO si ya existe
+                if (dao.countExisting(msg.fromAddress, msg.toAddress, msg.subject, msg.timestamp) > 0) {
+                    continue;
+                }
 
                 dao.insert(msg);
 

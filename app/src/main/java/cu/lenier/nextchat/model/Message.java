@@ -1,9 +1,16 @@
 package cu.lenier.nextchat.model;
 
 import androidx.room.Entity;
+import androidx.room.Index;
 import androidx.room.PrimaryKey;
 
-@Entity(tableName = "messages")
+@Entity(
+        tableName = "messages",
+        indices = @Index(
+                value = {"fromAddress", "toAddress", "subject", "timestamp"},
+                unique = true
+        )
+)
 public class Message {
     public static final int STATE_FAILED  = 0;
     public static final int STATE_PENDING = 1;

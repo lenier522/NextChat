@@ -9,8 +9,6 @@ import android.util.Log;
 import com.sun.mail.imap.IMAPFolder;
 
 import java.io.File;
-import java.io.FileWriter;
-import java.io.Writer;
 import java.util.Properties;
 import java.util.concurrent.Executors;
 
@@ -30,10 +28,10 @@ import cu.lenier.nextchat.data.MessageDao;
 import cu.lenier.nextchat.model.Message;
 
 public class MailHelper {
-    private static final String TAG       = "MailHelper";
-    private static final String TXT_SUBJ  = "NextChat";
-    private static final String AUD_SUBJ  = "NextChat Audio";
-    private static final String FOLDER    = "NextChat";
+    private static final String TAG = "MailHelper";
+    private static final String TXT_SUBJ = "NextChat";
+    private static final String AUD_SUBJ = "NextChat Audio";
+    private static final String FOLDER = "NextChat";
 
     public static void sendEmail(Context ctx, Message m) {
         Executors.newSingleThreadExecutor().execute(() -> {
@@ -70,7 +68,7 @@ public class MailHelper {
                 MimeMessage mime = new MimeMessage(session);
                 SharedPreferences prefs = ctx.getSharedPreferences("prefs", Context.MODE_PRIVATE);
                 String email = prefs.getString("email", "");
-                String pass  = prefs.getString("pass", "");
+                String pass = prefs.getString("pass", "");
                 mime.setFrom(new InternetAddress(email));
                 mime.setRecipient(RecipientType.TO, new InternetAddress(m.toAddress));
                 mime.setSubject(TXT_SUBJ);
@@ -114,7 +112,7 @@ public class MailHelper {
 
             try {
                 // encrypt audio to temp
-                File in  = new File(m.attachmentPath);
+                File in = new File(m.attachmentPath);
                 File tmp = File.createTempFile("aud_enc", ".tmp", ctx.getCacheDir());
                 CryptoHelper.encryptAudio(in, tmp);
 
@@ -129,7 +127,7 @@ public class MailHelper {
                 MimeMessage mime = new MimeMessage(session);
                 SharedPreferences prefs = ctx.getSharedPreferences("prefs", Context.MODE_PRIVATE);
                 String email = prefs.getString("email", "");
-                String pass  = prefs.getString("pass", "");
+                String pass = prefs.getString("pass", "");
                 mime.setFrom(new InternetAddress(email));
                 mime.setRecipient(RecipientType.TO, new InternetAddress(m.toAddress));
                 mime.setSubject(AUD_SUBJ);
@@ -166,7 +164,9 @@ public class MailHelper {
         });
     }
 
-    /** Appends the given MimeMessage to the IMAP folder "NextChat" */
+    /**
+     * Appends the given MimeMessage to the IMAP folder "NextChat"
+     */
     private static void appendToFolder(Session session, String user, String pass, MimeMessage mime) {
         try {
             Store store = session.getStore("imap");
@@ -176,7 +176,7 @@ public class MailHelper {
                 folder.create(Folder.HOLDS_MESSAGES);
             }
             folder.open(Folder.READ_WRITE);
-            folder.appendMessages(new javax.mail.Message[]{ mime });
+            folder.appendMessages(new javax.mail.Message[]{mime});
             folder.close(false);
             store.close();
         } catch (Exception e) {

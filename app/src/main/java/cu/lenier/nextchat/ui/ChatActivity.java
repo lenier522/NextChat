@@ -39,7 +39,6 @@ import cu.lenier.nextchat.util.MailHelper;
 import cu.lenier.nextchat.util.SimpleTextWatcher;
 import cu.lenier.nextchat.work.MailSyncWorker;
 
-
 public class ChatActivity extends AppCompatActivity {
     private static final int REQ_AUDIO = 1001;
 
@@ -51,29 +50,19 @@ public class ChatActivity extends AppCompatActivity {
     private String contact, me;
     private MediaRecorder recorder;
     private String audioPath;
+
     private long lastIncomingTs = 0;
     private final Handler handler = new Handler();
     private ConnectivityManager.NetworkCallback netCallback;
-    private ConnectivityManager cm;
 
-    private final Runnable showOfflineRunnable = () -> {
-        if (getSupportActionBar() != null) {
-            Locale es = new Locale("es");
-            String date = new SimpleDateFormat("d 'de' MMM", es)
-                    .format(new Date(lastIncomingTs));
-            String time = new SimpleDateFormat("hh:mm a", es)
-                    .format(new Date(lastIncomingTs));
-            getSupportActionBar().setSubtitle("últ. vez " + date + ", " + time);
-        }
-    };
+    // Runnable para cambiar a "últ. vez ..."
+    private final Runnable offlineRunnable = this::showLastSeen;
 
-    // **Esto**: handler para disparar sync periódica
+    // Sync loop
     private final Handler syncHandler = new Handler();
     private final Runnable syncRunnable = new Runnable() {
         @Override public void run() {
-            // fuerza al Worker a sincronizar YA
             MailSyncWorker.forceSyncNow(ChatActivity.this);
-            // reprograma en 5 segundos
             syncHandler.postDelayed(this, 5_000);
         }
     };
@@ -92,37 +81,46 @@ public class ChatActivity extends AppCompatActivity {
         }
 
         rv = findViewById(R.id.rvMessages);
-        et = findViewById(R.id.etMessage);
-        fab = findViewById(R.id.fabSend);
         rv.setLayoutManager(new LinearLayoutManager(this));
         adapter = new MessageAdapter();
         rv.setAdapter(adapter);
 
+        et  = findViewById(R.id.etMessage);
+        fab = findViewById(R.id.fabSend);
+
         me = getSharedPreferences("prefs", MODE_PRIVATE).getString("email", "");
 
+        // Observador en tiempo real
         AppDatabase.getInstance(this)
                 .messageDao()
                 .getByContact(contact)
-                .observe(this, msgs -> {
-                    adapter.setMessages(msgs);
-                    rv.scrollToPosition(adapter.getItemCount() - 1);
-                    Executors.newSingleThreadExecutor().execute(() ->
-                            AppDatabase.getInstance(this)
-                                    .messageDao()
-                                    .markAsRead(contact, me)
-                    );
-                    for (int i = msgs.size() - 1; i >= 0; i--) {
-                        Message m = msgs.get(i);
-                        if (!m.sent) {
-                            lastIncomingTs = m.timestamp;
-                            break;
+                .observe(this, new Observer<List<Message>>() {
+                    @Override
+                    public void onChanged(List<Message> msgs) {
+                        adapter.setMessages(msgs);
+                        rv.scrollToPosition(adapter.getItemCount() - 1);
+
+                        Executors.newSingleThreadExecutor().execute(() ->
+                                AppDatabase.getInstance(ChatActivity.this)
+                                        .messageDao()
+                                        .markAsRead(contact, me)
+                        );
+
+                        // Actualizar última recepción
+                        for (int i = msgs.size() - 1; i >= 0; i--) {
+                            Message m = msgs.get(i);
+                            if (!m.sent) {
+                                lastIncomingTs = m.timestamp;
+                                break;
+                            }
                         }
+                        updateOnlineStatus();
                     }
                 });
 
-        et.addTextChangedListener(new SimpleTextWatcher() {
-            @Override
-            public void onTextChanged(CharSequence s, int st, int b, int c) {
+        // Cambiar icono según texto
+        et.addTextChangedListener(new SimpleTextWatcher(){
+            @Override public void onTextChanged(CharSequence s,int st,int b,int c){
                 fab.setImageResource(
                         s.toString().trim().isEmpty()
                                 ? R.mipmap.ic_mic
@@ -131,21 +129,22 @@ public class ChatActivity extends AppCompatActivity {
             }
         });
 
+        // Enviar texto
         fab.setOnClickListener(v -> {
             String txt = et.getText().toString().trim();
             if (!txt.isEmpty()) {
                 et.setText("");
                 Message m = new Message();
-                m.fromAddress = me;
-                m.toAddress = contact;
-                m.subject = "NextChat";
-                m.body = txt;
+                m.fromAddress    = me;
+                m.toAddress      = contact;
+                m.subject        = "NextChat";
+                m.body           = txt;
                 m.attachmentPath = null;
-                m.timestamp = System.currentTimeMillis();
-                m.sent = true;
-                m.read = true;
-                m.type = "text";
-                m.sendState = Message.STATE_PENDING;
+                m.timestamp      = System.currentTimeMillis();
+                m.sent           = true;
+                m.read           = true;
+                m.type           = "text";
+                m.sendState      = Message.STATE_PENDING;
                 MailHelper.sendEmail(this, m);
             } else {
                 Toast.makeText(this,
@@ -154,150 +153,126 @@ public class ChatActivity extends AppCompatActivity {
             }
         });
 
+        // Grabación de audio
         fab.setOnLongClickListener(v -> {
             if (checkAudioPerm()) startRecording();
             return true;
         });
-        fab.setOnTouchListener((v, e) -> {
-            if (e.getAction() == MotionEvent.ACTION_UP && recorder != null) {
+        fab.setOnTouchListener((v,e) -> {
+            if (e.getAction()==MotionEvent.ACTION_UP && recorder!=null) {
                 stopRecordingAndSend();
             }
             return false;
         });
 
-        cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
-        netCallback = new ConnectivityManager.NetworkCallback() {
-            @Override
-            public void onAvailable(Network network) {
-                handler.post(this::updateConnectedSubtitle);
+        // Estado de conexión en toolbar
+        ConnectivityManager cm = (ConnectivityManager)
+                getSystemService(Context.CONNECTIVITY_SERVICE);
+        netCallback = new ConnectivityManager.NetworkCallback(){
+            @Override public void onAvailable(Network network){
+                if (getSupportActionBar()!=null)
+                    getSupportActionBar().setSubtitle("Conectado");
             }
-
-            private void updateConnectedSubtitle() {
-                if (getSupportActionBar() == null) return;
-                long now = System.currentTimeMillis();
-                if (now < lastIncomingTs + 2 * 60_000) {
-                    getSupportActionBar().setSubtitle("en línea");
-                } else {
-                    handler.removeCallbacks(showOfflineRunnable);
-                    handler.post(showOfflineRunnable);
-                }
-            }
-
-            @Override
-            public void onLost(Network network) {
-                handler.post(() -> {
-                    if (getSupportActionBar() != null)
-                        getSupportActionBar().setSubtitle("Esperando conexión...");
-                });
+            @Override public void onLost(Network network){
+                if (getSupportActionBar()!=null)
+                    getSupportActionBar().setSubtitle("Sin conexión");
             }
         };
         cm.registerDefaultNetworkCallback(netCallback);
     }
 
-    @Override
-    protected void onResume() {
+    @Override protected void onResume() {
         super.onResume();
         AppConfig.setCurrentChat(contact);
         syncHandler.post(syncRunnable);
     }
-
     @Override protected void onPause() {
         super.onPause();
-        // paro el loop
         syncHandler.removeCallbacks(syncRunnable);
-        // ya no estoy en este chat
         AppConfig.setCurrentChat(null);
     }
-
-    @Override
-    protected void onStart() {
-        super.onStart();
-        AppConfig.setCurrentChat(contact);
+    @Override protected void onDestroy() {
+        super.onDestroy();
+        handler.removeCallbacks(offlineRunnable);
+        syncHandler.removeCallbacks(syncRunnable);
+        ((ConnectivityManager)getSystemService(Context.CONNECTIVITY_SERVICE))
+                .unregisterNetworkCallback(netCallback);
     }
-
-    @Override
-    protected void onStop() {
-        super.onStop();
-        AppConfig.setCurrentChat(null);
-    }
-
 
     private boolean checkAudioPerm() {
         if (ContextCompat.checkSelfPermission(
                 this, Manifest.permission.RECORD_AUDIO
-        ) != PackageManager.PERMISSION_GRANTED
-        ) {
+        ) != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(
                     this,
-                    new String[]{Manifest.permission.RECORD_AUDIO},
+                    new String[]{ Manifest.permission.RECORD_AUDIO },
                     REQ_AUDIO
             );
             return false;
         }
         return true;
     }
-
     private void startRecording() {
         try {
-            File dir = new File(
-                    getExternalFilesDir(null), "audios_enviados"
-            );
+            File dir = new File(getExternalFilesDir(null), "audios_enviados");
             if (!dir.exists()) dir.mkdirs();
-            audioPath = new File(
-                    dir, "audio_" + System.currentTimeMillis() + ".3gp"
-            ).getAbsolutePath();
+            audioPath = new File(dir, "audio_" + System.currentTimeMillis() + ".3gp")
+                    .getAbsolutePath();
 
             recorder = new MediaRecorder();
-            recorder.setAudioSource(
-                    MediaRecorder.AudioSource.MIC
-            );
-            recorder.setOutputFormat(
-                    MediaRecorder.OutputFormat.THREE_GPP
-            );
+            recorder.setAudioSource(MediaRecorder.AudioSource.MIC);
+            recorder.setOutputFormat(MediaRecorder.OutputFormat.THREE_GPP);
             recorder.setOutputFile(audioPath);
-            recorder.setAudioEncoder(
-                    MediaRecorder.AudioEncoder.AMR_NB
-            );
+            recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AMR_NB);
             recorder.prepare();
             recorder.start();
-            Toast.makeText(this,
-                    "Grabando audio...", Toast.LENGTH_SHORT
-            ).show();
+            Toast.makeText(this, "Grabando audio...", Toast.LENGTH_SHORT).show();
         } catch (IOException e) {
             e.printStackTrace();
-            Toast.makeText(this,
-                    "Error al grabar audio", Toast.LENGTH_SHORT
-            ).show();
+            Toast.makeText(this, "Error al grabar audio", Toast.LENGTH_SHORT).show();
         }
     }
-
     private void stopRecordingAndSend() {
         recorder.stop();
         recorder.release();
         recorder = null;
-        Toast.makeText(this,
-                "Enviando audio...", Toast.LENGTH_SHORT
-        ).show();
+        Toast.makeText(this, "Enviando audio...", Toast.LENGTH_SHORT).show();
 
         Message m = new Message();
-        m.fromAddress = me;
-        m.toAddress = contact;
-        m.subject = "NextChat Audio";
-        m.body = "";
+        m.fromAddress    = me;
+        m.toAddress      = contact;
+        m.subject        = "NextChat Audio";
+        m.body           = "";
         m.attachmentPath = audioPath;
-        m.timestamp = System.currentTimeMillis();
-        m.sent = true;
-        m.read = true;
-        m.type = "audio";
-        m.sendState = Message.STATE_PENDING;
-
+        m.timestamp      = System.currentTimeMillis();
+        m.sent           = true;
+        m.read           = true;
+        m.type           = "audio";
+        m.sendState      = Message.STATE_PENDING;
         MailHelper.sendAudioEmail(this, m);
     }
 
-    @Override
-    protected void onDestroy() {
-        super.onDestroy();
-        cm.unregisterNetworkCallback(netCallback);
-        handler.removeCallbacksAndMessages(null);
+    /** Actualiza “en línea” o programa “últ. vez …” **/
+    private void updateOnlineStatus() {
+        handler.removeCallbacks(offlineRunnable);
+        long now = System.currentTimeMillis();
+        if (now < lastIncomingTs + 120_000) {
+            if (getSupportActionBar()!=null)
+                getSupportActionBar().setSubtitle("en línea");
+            long delay = (lastIncomingTs + 120_000) - now;
+            handler.postDelayed(offlineRunnable, delay);
+        } else {
+            showLastSeen();
+        }
+    }
+
+    /** Muestra “últ. vez d 'de' MMM, hh:mm a” **/
+    private void showLastSeen() {
+        if (getSupportActionBar()==null) return;
+        String date = new SimpleDateFormat("d 'de' MMM", new Locale("es"))
+                .format(new Date(lastIncomingTs));
+        String time = new SimpleDateFormat("hh:mm a", new Locale("es"))
+                .format(new Date(lastIncomingTs));
+        getSupportActionBar().setSubtitle("últ. vez " + date + ", " + time);
     }
 }

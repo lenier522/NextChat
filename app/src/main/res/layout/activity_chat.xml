@@ -1,52 +1,83 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout
+<androidx.constraintlayout.widget.ConstraintLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
-    android:orientation="vertical"
+    android:id="@+id/chat_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
+    <!-- AppBar -->
     <com.google.android.material.appbar.AppBarLayout
+        android:id="@+id/appBarLayout"
+        android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_width="match_parent">
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
 
         <androidx.appcompat.widget.Toolbar
             android:id="@+id/toolbar_chat"
             android:layout_width="match_parent"
             android:layout_height="?attr/actionBarSize"
-            app:titleTextAppearance="@style/TextAppearance.AppCompat.Title"
-            app:subtitleTextAppearance="@style/TextAppearance.AppCompat.Subhead"
-            app:popupTheme="@style/ThemeOverlay.AppCompat.Light"/>
+            app:popupTheme="@style/ThemeOverlay.AppCompat.Light" />
     </com.google.android.material.appbar.AppBarLayout>
 
+    <!-- Mensajes -->
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/rvMessages"
-        android:layout_width="match_parent"
+        android:layout_width="0dp"
         android:layout_height="0dp"
-        android:layout_weight="1" />
+        android:paddingTop="4dp"
+        android:paddingBottom="4dp"
+        app:layout_constraintBottom_toTopOf="@+id/linearLayout"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/appBarLayout" />
 
     <LinearLayout
+        android:id="@+id/linearLayout"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:padding="8dp"
-        android:gravity="center_vertical">
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent">
 
-        <EditText
-            android:id="@+id/etMessage"
+        <!-- Entrada de texto -->
+        <androidx.cardview.widget.CardView
+            android:id="@+id/input_bar"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="56dp"
+            android:layout_margin="8dp"
             android:layout_weight="1"
-            android:hint="Mensaje..."
-            android:maxLines="4"
-            android:inputType="textMultiLine"/>
+            app:cardCornerRadius="28dp"
+            app:cardElevation="2dp">
 
+            <EditText
+                android:id="@+id/etMessage"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="@drawable/bg_edittext_round"
+                android:hint="Mensaje..."
+                android:inputType="textMultiLine"
+                android:maxLines="4"
+                android:paddingStart="16dp"
+                android:paddingEnd="72dp" />
+        </androidx.cardview.widget.CardView>
+
+        <!-- FAB fuera del CardView -->
         <com.google.android.material.floatingactionbutton.FloatingActionButton
             android:id="@+id/fabSend"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            app:srcCompat="@mipmap/ic_mic"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:layout_marginTop="7dp"
+            android:layout_marginEnd="8dp"
+            android:layout_marginBottom="-28dp"
             android:contentDescription="Enviar o grabar"
-            android:layout_marginStart="8dp"/>
+            app:backgroundTint="@color/colorAccent"
+            app:srcCompat="@mipmap/ic_mic" />
+
     </LinearLayout>
-</LinearLayout>
+
+
+</androidx.constraintlayout.widget.ConstraintLayout>
