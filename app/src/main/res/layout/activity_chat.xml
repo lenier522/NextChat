@@ -61,6 +61,7 @@
                 android:hint="Mensaje..."
                 android:inputType="textMultiLine"
                 android:maxLines="4"
+                android:textColor="@color/black"
                 android:paddingStart="16dp"
                 android:paddingEnd="72dp" />
         </androidx.cardview.widget.CardView>

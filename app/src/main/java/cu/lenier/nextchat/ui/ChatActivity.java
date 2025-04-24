@@ -170,15 +170,21 @@ public class ChatActivity extends AppCompatActivity {
                 getSystemService(Context.CONNECTIVITY_SERVICE);
         netCallback = new ConnectivityManager.NetworkCallback(){
             @Override public void onAvailable(Network network){
-                if (getSupportActionBar()!=null)
-                    getSupportActionBar().setSubtitle("Conectado");
+                // Pasa la actualización de la barra al hilo UI
+                runOnUiThread(() -> {
+                    if (getSupportActionBar()!=null)
+                        getSupportActionBar().setSubtitle("Conectado");
+                });
             }
             @Override public void onLost(Network network){
-                if (getSupportActionBar()!=null)
-                    getSupportActionBar().setSubtitle("Sin conexión");
+                runOnUiThread(() -> {
+                    if (getSupportActionBar()!=null)
+                        getSupportActionBar().setSubtitle("Sin conexión");
+                });
             }
         };
         cm.registerDefaultNetworkCallback(netCallback);
+
     }
 
     @Override protected void onResume() {

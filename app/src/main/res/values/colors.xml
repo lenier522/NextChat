@@ -7,4 +7,6 @@
     <color name="gray_200">#FFEEEEEE</color>
 
     <color name="colorAccent">#7C76F1</color>
+
+    <color name="gray">#DD8B8888</color>
 </resources>

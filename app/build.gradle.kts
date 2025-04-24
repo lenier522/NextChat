@@ -8,9 +8,9 @@ android {
 
     defaultConfig {
         applicationId = "cu.lenier.nextchat"
-        minSdk = 21
+        minSdk = 24
         targetSdk = 35
-        versionCode = 1
+        versionCode = 51
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -51,8 +51,13 @@ dependencies {
     implementation(libs.work.runtime)
     implementation(libs.core)
     implementation(libs.legacy.support.core.utils)
+    implementation(libs.gson)
+    implementation (libs.update.checker)
     annotationProcessor(libs.room.compiler)
     testImplementation(libs.junit)
     androidTestImplementation(libs.ext.junit)
     androidTestImplementation(libs.espresso.core)
+
+    implementation("com.github.alxrm:audiowave-progressbar:0.9.2")
+
 }

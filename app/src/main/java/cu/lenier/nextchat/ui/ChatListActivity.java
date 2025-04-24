@@ -1,24 +1,34 @@
 package cu.lenier.nextchat.ui;
 
+import static androidx.core.content.ContentProviderCompat.requireContext;
+
 import android.content.Intent;
+import android.content.SharedPreferences;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.util.Patterns;
+import android.view.View;
+import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.EditText;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.Toolbar;
-import androidx.lifecycle.Observer;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.floatingactionbutton.FloatingActionButton;
+import com.lenier.update_chaker.UpdateChecker;
 
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -57,6 +67,57 @@ public class ChatListActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_chat_list);
+
+
+        //Version Automatica
+        PackageInfo pinfo = null;
+        try {
+            pinfo = getPackageManager().getPackageInfo(getPackageName(),0);
+        } catch (PackageManager.NameNotFoundException e) {
+            e.printStackTrace();
+        }
+        String url = "https://raw.githubusercontent.com/lenier522/update/main/update.json";
+        double currentVersion = Double.parseDouble((pinfo.versionName));
+        int currentCode = pinfo.versionCode;
+        // String jsonUrl = "https://perf3ctsolutions.com/update.json"; // URL del JSON
+        boolean useNotification = true; // Usar diálogo en lugar de notificación
+        UpdateChecker.checkForUpdate(this, currentCode, url, useNotification);
+
+        String currentVersionName = String.valueOf(currentVersion);
+
+        //Dialogo Info
+        boolean shown = getSharedPreferences(currentVersionName, MODE_PRIVATE)
+                .getBoolean("about_shown", false);
+
+        if (!shown) {
+            View view = getLayoutInflater().inflate(R.layout.dialog_about, null);
+            CheckBox chePol = view.findViewById(R.id.checkPol);
+            Button btnAcept = view.findViewById(R.id.btnCheck);
+            TextView tvVerion = view.findViewById(R.id.tvVersion);
+            tvVerion.setText(currentVersionName);
+            btnAcept.setEnabled(false); // Inicialmente deshabilitado
+            chePol.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                btnAcept.setEnabled(isChecked); // Habilita el botón solo si está marcado
+            });
+            MaterialAlertDialogBuilder builder = new MaterialAlertDialogBuilder(this, R.style.Theme_NextChat_AlertDialog);
+            builder.setView(view)
+                    .setCancelable(false);
+
+            AlertDialog dialog = builder.create();
+            btnAcept.setOnClickListener(v -> {
+                getSharedPreferences(currentVersionName, MODE_PRIVATE)
+                        .edit()
+                        .putBoolean("about_shown", true)
+                        .apply();
+
+                dialog.dismiss(); // Cierra el diálogo después de aceptar
+            });
+
+            dialog.show();
+        }
+
+
+
 
         // Toolbar
         toolbar = findViewById(R.id.toolbar);
