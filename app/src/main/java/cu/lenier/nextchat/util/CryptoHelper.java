@@ -17,6 +17,7 @@ public class CryptoHelper {
     private static final String KEY  = "0123456789abcdef";
     private static final String ALGO = "AES/CBC/PKCS5Padding";
 
+    // Encripción/Decripción de texto (Base64)
     public static String encrypt(String plain) throws Exception {
         byte[] key = KEY.getBytes("UTF-8");
         SecretKeySpec ks = new SecretKeySpec(key, "AES");
@@ -44,6 +45,7 @@ public class CryptoHelper {
         return new String(dec, "UTF-8");
     }
 
+    // Encripción y decripción de audio (streaming con IV prepended)
     public static void encryptAudio(File in, File out) throws Exception {
         byte[] key = KEY.getBytes("UTF-8");
         SecretKeySpec ks = new SecretKeySpec(key, "AES");
@@ -55,6 +57,7 @@ public class CryptoHelper {
         try (FileOutputStream fos = new FileOutputStream(out);
              CipherOutputStream cos = new CipherOutputStream(fos, c);
              FileInputStream fis = new FileInputStream(in)) {
+            // Escribimos el IV primero
             fos.write(iv);
             byte[] buf = new byte[4096];
             int r;
@@ -76,6 +79,50 @@ public class CryptoHelper {
                 byte[] buf = new byte[4096];
                 int r;
                 while ((r = cis.read(buf)) != -1) fos.write(buf,0,r);
+            }
+        }
+    }
+
+    /** Cifra cualquier fichero (incluyendo imágenes) **/
+    public static void encryptFile(File in, File out) throws Exception {
+        byte[] key = KEY.getBytes("UTF-8");
+        SecretKeySpec ks = new SecretKeySpec(key, "AES");
+        Cipher c = Cipher.getInstance(ALGO);
+        byte[] iv = new byte[16];
+        new SecureRandom().nextBytes(iv);
+        c.init(Cipher.ENCRYPT_MODE, ks, new IvParameterSpec(iv));
+
+        try (FileOutputStream fos = new FileOutputStream(out);
+             CipherOutputStream cos = new CipherOutputStream(fos, c);
+             FileInputStream fis = new FileInputStream(in)) {
+            // primero escribimos la IV
+            fos.write(iv);
+            byte[] buf = new byte[4096];
+            int r;
+            while ((r = fis.read(buf)) != -1) {
+                cos.write(buf, 0, r);
+            }
+        }
+    }
+
+    /** Descifra cualquier fichero cifrado con encryptFile **/
+    public static void decryptFile(File in, File out) throws Exception {
+        byte[] key = KEY.getBytes("UTF-8");
+        SecretKeySpec ks = new SecretKeySpec(key, "AES");
+        try (FileInputStream fis = new FileInputStream(in)) {
+            byte[] iv = new byte[16];
+            if (fis.read(iv) != iv.length) {
+                throw new IllegalArgumentException("Invalid encrypted file");
+            }
+            Cipher c = Cipher.getInstance(ALGO);
+            c.init(Cipher.DECRYPT_MODE, ks, new IvParameterSpec(iv));
+            try (CipherInputStream cis = new CipherInputStream(fis, c);
+                 FileOutputStream fos = new FileOutputStream(out)) {
+                byte[] buf = new byte[4096];
+                int r;
+                while ((r = cis.read(buf)) != -1) {
+                    fos.write(buf, 0, r);
+                }
             }
         }
     }

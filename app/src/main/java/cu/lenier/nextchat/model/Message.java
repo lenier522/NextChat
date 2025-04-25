@@ -26,6 +26,6 @@ public class Message {
     public long   timestamp;
     public boolean sent;      // true = este es tu mensaje
     public boolean read;
-    public String  type;      // "text" o "audio"
+    public String  type;      // "text" o "audio" o "imagen"
     public int     sendState; // 0=failed,1=pending,2=sent
 }

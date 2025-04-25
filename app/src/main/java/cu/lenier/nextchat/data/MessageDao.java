@@ -27,32 +27,35 @@ public interface MessageDao {
     @Delete
     void delete(Message msg);
 
+    /** Mensajes de un contacto, incluyendo imágenes */
     @Query("SELECT * FROM messages " +
-            "WHERE subject IN ('NextChat','NextChat Audio') " +
+            "WHERE subject IN ('NextChat','NextChat Audio','NextChat Image') " +
             "  AND (fromAddress = :addr OR toAddress = :addr) " +
             "ORDER BY timestamp ASC")
     LiveData<List<Message>> getByContact(String addr);
 
+    /** Lista de contactos con los que has chateado (cualquier tipo) */
     @Query("SELECT DISTINCT CASE WHEN sent=1 THEN toAddress ELSE fromAddress END " +
             "FROM messages " +
-            "WHERE subject IN ('NextChat','NextChat Audio')")
+            "WHERE subject IN ('NextChat','NextChat Audio','NextChat Image')")
     LiveData<List<String>> getContacts();
 
+    /** Recuentos de no leídos, agrupa también imágenes */
     @Query("SELECT CASE WHEN sent=1 THEN toAddress ELSE fromAddress END AS contact, " +
-            "COUNT(*) AS unread " +
+            "       COUNT(*) AS unread " +
             "FROM messages " +
-            "WHERE subject IN ('NextChat','NextChat Audio') " +
+            "WHERE subject IN ('NextChat','NextChat Audio','NextChat Image') " +
             "  AND sent=0 AND read=0 " +
             "GROUP BY contact")
     LiveData<List<UnreadCount>> getUnreadCounts();
 
     @Query("UPDATE messages SET read=1 " +
-            "WHERE subject IN ('NextChat','NextChat Audio') " +
+            "WHERE subject IN ('NextChat','NextChat Audio','NextChat Image') " +
             "  AND fromAddress=:contact AND toAddress=:me AND read=0")
     void markAsRead(String contact, String me);
 
     @Query("DELETE FROM messages " +
-            "WHERE subject IN ('NextChat','NextChat Audio') " +
+            "WHERE subject IN ('NextChat','NextChat Audio','NextChat Image') " +
             "  AND (fromAddress=:contact OR toAddress=:contact)")
     void deleteByContact(String contact);
 
@@ -60,7 +63,7 @@ public interface MessageDao {
     void deleteById(int id);
 
     @Query("SELECT * FROM messages " +
-            "WHERE subject IN ('NextChat','NextChat Audio') " +
+            "WHERE subject IN ('NextChat','NextChat Audio','NextChat Image') " +
             "  AND (fromAddress = :contact OR toAddress = :contact) " +
             "ORDER BY timestamp DESC " +
             "LIMIT 1")

@@ -1,6 +1,5 @@
 package cu.lenier.nextchat.service;
 
-import android.Manifest;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.Service;
@@ -14,22 +13,20 @@ import androidx.core.app.NotificationCompat;
 import androidx.core.app.NotificationManagerCompat;
 
 import com.sun.mail.imap.IMAPFolder;
+import com.sun.mail.imap.IMAPStore;
 
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
-import java.util.Locale;
 import java.util.Properties;
 import java.util.concurrent.Executors;
 
 import javax.mail.Flags;
 import javax.mail.Folder;
+import javax.mail.Multipart;
 import javax.mail.Part;
 import javax.mail.Session;
-import javax.mail.Store;
 import javax.mail.search.FlagTerm;
-import javax.mail.event.MessageCountAdapter;
-import javax.mail.event.MessageCountEvent;
 
 import cu.lenier.nextchat.R;
 import cu.lenier.nextchat.config.AppConfig;
@@ -39,23 +36,23 @@ import cu.lenier.nextchat.model.Message;
 import cu.lenier.nextchat.util.CryptoHelper;
 
 public class MailService extends Service {
-    private static final String TAG            = "MailService";
-    private static final String TXT_SUBJ       = "NextChat";
-    private static final String AUD_SUBJ       = "NextChat Audio";
-    private static final String CHANNEL_SYNC   = "MailSyncChannel";
-    private static final String CHANNEL_NEWMSG = "NewMsgChannel";
-    private static final int    NOTIF_ID_SYNC  = 1;
+    private static final String TAG       = "MailService";
+    private static final String TXT_SUBJ  = "NextChat";
+    private static final String AUD_SUBJ  = "NextChat Audio";
+    private static final String IMG_SUBJ  = "NextChat Image";
+    private static final String FOLDER    = "NextChat";
+    private static final String CH_SYNC   = "MailSyncChannel";
+    private static final String CH_NEWMSG = "NewMsgChannel";
+    private static final int    NOTIF_SYNC = 1;
 
     private MessageDao dao;
     private Session    session;
     private IMAPFolder inbox;
     private volatile boolean running = false;
 
-    @Override
-    public void onCreate() {
+    @Override public void onCreate() {
         super.onCreate();
         dao = AppDatabase.getInstance(this).messageDao();
-
         Properties props = new Properties();
         props.put("mail.imap.host", "imap.nauta.cu");
         props.put("mail.imap.port", "143");
@@ -64,21 +61,16 @@ public class MailService extends Service {
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationManager nm = getSystemService(NotificationManager.class);
-            nm.createNotificationChannel(new NotificationChannel(
-                    CHANNEL_SYNC,  "NextChat Sync",    NotificationManager.IMPORTANCE_LOW));
-            nm.createNotificationChannel(new NotificationChannel(
-                    CHANNEL_NEWMSG,"Notificaciones",   NotificationManager.IMPORTANCE_DEFAULT));
+            nm.createNotificationChannel(new NotificationChannel(CH_SYNC, "Sync", NotificationManager.IMPORTANCE_LOW));
+            nm.createNotificationChannel(new NotificationChannel(CH_NEWMSG, "Nuevos", NotificationManager.IMPORTANCE_DEFAULT));
         }
     }
 
-    @Override
-    public int onStartCommand(Intent intent,int flags,int startId) {
-        NotificationCompat.Builder b = new NotificationCompat.Builder(this, CHANNEL_SYNC)
-                .setContentTitle("NextChat")
-                .setContentText("Esperando mensajes…")
-                .setSmallIcon(android.R.drawable.ic_popup_sync)
-                .setOngoing(true);
-        startForeground(NOTIF_ID_SYNC, b.build());
+    @Override public int onStartCommand(Intent intent, int flags, int startId) {
+        NotificationCompat.Builder b = new NotificationCompat.Builder(this, CH_SYNC)
+                .setContentTitle("NextChat").setContentText("Esperando mensajes…")
+                .setSmallIcon(android.R.drawable.ic_popup_sync).setOngoing(true);
+        startForeground(NOTIF_SYNC, b.build());
 
         if (!running) {
             running = true;
@@ -89,55 +81,44 @@ public class MailService extends Service {
 
     private void imapIdleLoop() {
         while (running) {
-            Store store = null;
+            IMAPStore store = null;
             try {
-                String email = getSharedPreferences("prefs", MODE_PRIVATE)
-                        .getString("email", "");
-                String pass  = getSharedPreferences("prefs", MODE_PRIVATE)
-                        .getString("pass", "");
-
-                store = session.getStore("imap");
+                String email = getSharedPreferences("prefs", MODE_PRIVATE).getString("email", "");
+                String pass  = getSharedPreferences("prefs", MODE_PRIVATE).getString("pass",  "");
+                store = (IMAPStore) session.getStore("imap");
                 store.connect("imap.nauta.cu", 143, email, pass);
 
-                Folder root = store.getFolder("INBOX");
-                inbox = (IMAPFolder) root.getFolder("NextChat");
+                // Abrimos la misma carpeta "NextChat" utilizada al enviar
+                inbox = (IMAPFolder) store.getFolder("INBOX");
                 if (!inbox.exists()) inbox.create(Folder.HOLDS_MESSAGES);
                 inbox.open(Folder.READ_WRITE);
 
-                // Descarga inicial de no vistos
-                FlagTerm unseen = new FlagTerm(new Flags(Flags.Flag.SEEN), false);
-                javax.mail.Message[] init = inbox.search(unseen);
-                for (javax.mail.Message m : init) handleIncoming(m);
-                inbox.setFlags(init, new Flags(Flags.Flag.SEEN), true);
+                // Procesar mensajes no vistos
+                for (javax.mail.Message m : inbox.search(new FlagTerm(new Flags(Flags.Flag.SEEN), false))) {
+                    handleIncoming(m);
+                }
+                inbox.setFlags(inbox.search(new FlagTerm(new Flags(Flags.Flag.SEEN), false)),
+                        new Flags(Flags.Flag.SEEN), true);
 
-                inbox.addMessageCountListener(new MessageCountAdapter() {
-                    @Override public void messagesAdded(MessageCountEvent ev) {
-                        for (javax.mail.Message m : ev.getMessages()) {
-                            handleIncoming(m);
-                        }
-                        try {
-                            inbox.setFlags(ev.getMessages(),
-                                    new Flags(Flags.Flag.SEEN), true);
-                        } catch (Exception ignore) {}
+                // Listener para nuevos mensajes
+                inbox.addMessageCountListener(new javax.mail.event.MessageCountAdapter() {
+                    @Override public void messagesAdded(javax.mail.event.MessageCountEvent ev) {
+                        for (javax.mail.Message m : ev.getMessages()) handleIncoming(m);
+                        try { inbox.setFlags(ev.getMessages(), new Flags(Flags.Flag.SEEN), true); }
+                        catch (Exception ignored) {}
                     }
                 });
 
                 while (running && inbox.isOpen()) {
-                    try {
-                        inbox.idle();
-                    } catch (Exception idleEx) {
-                        Log.w(TAG, "IDLE error, reiniciando loop", idleEx);
-                        break;
-                    }
+                    try { inbox.idle(); }
+                    catch (Exception idleEx) { break; }
                 }
-
             } catch (Exception e) {
-                Log.e(TAG, "imapIdleLoop fallo, reintentando en 5s", e);
+                Log.e(TAG, "imapIdleLoop fallo", e);
             } finally {
-                try { if (inbox != null && inbox.isOpen()) inbox.close(false); } catch (Exception ignored) {}
+                try { if (inbox.isOpen()) inbox.close(false); } catch (Exception ignored) {}
                 try { if (store != null && store.isConnected()) store.close(); } catch (Exception ignored) {}
             }
-
             try { Thread.sleep(5000); } catch (InterruptedException ignored) {}
         }
     }
@@ -145,90 +126,98 @@ public class MailService extends Service {
     private void handleIncoming(javax.mail.Message m) {
         try {
             String subj = m.getSubject();
-            if (!TXT_SUBJ.equals(subj) && !AUD_SUBJ.equals(subj)) return;
+            if (!TXT_SUBJ.equals(subj) && !AUD_SUBJ.equals(subj) && !IMG_SUBJ.equals(subj)) return;
 
+
+            String me   = getSharedPreferences("prefs", MODE_PRIVATE).getString("email", "");
             String from = m.getFrom()[0].toString();
-            String me   = getSharedPreferences("prefs", MODE_PRIVATE)
-                    .getString("email", "");
-            long   ts   = m.getReceivedDate().getTime();
 
-            // —— EVITAMOS DUPLICADOS ——
-            int existing = dao.countExisting(from, me, subj, ts);
-            Log.d(TAG, "countExisting(from=" + from + ", to=" + me +
-                    ", subj=" + subj + ", ts=" + ts + ") = " + existing);
-            if (existing > 0) {
-                Log.d(TAG, "Mensaje duplicado detectado, no se inserta.");
-                return;
-            }
+            if (from.toLowerCase().contains(me.toLowerCase())) return;
+
+            long ts     = m.getReceivedDate().getTime();
+            if (dao.countExisting(from, me, subj, ts) > 0) return;
 
             Message msg = new Message();
-            msg.fromAddress    = from;
-            msg.toAddress      = me;
-            msg.subject        = subj;
-            msg.timestamp      = ts;
-            msg.sent           = false;
-            msg.read           = false;
+            msg.fromAddress = from;
+            msg.toAddress   = me;
+            msg.subject     = subj;
+            msg.timestamp   = ts;
+            msg.sent        = false;
+            msg.read        = false;
 
             Object content = m.getContent();
-            if (TXT_SUBJ.equals(subj) && !(content instanceof javax.mail.Multipart)) {
+            if (TXT_SUBJ.equals(subj) && !(content instanceof Multipart)) {
                 msg.type = "text";
                 msg.body = CryptoHelper.decrypt(content.toString());
-            } else {
+            } else if (AUD_SUBJ.equals(subj)) {
                 msg.type = "audio";
                 msg.body = "";
-                javax.mail.Multipart mp = (javax.mail.Multipart) content;
-                for (int i = 0; i < mp.getCount(); i++) {
-                    Part part = mp.getBodyPart(i);
-                    if (Part.ATTACHMENT.equalsIgnoreCase(part.getDisposition())) {
-                        File dir = new File(getExternalFilesDir(null), "audios_recibidos");
-                        if (!dir.exists()) dir.mkdirs();
-                        File enc = new File(dir,
-                                System.currentTimeMillis() + "_" + part.getFileName());
-                        try (InputStream is = part.getInputStream();
-                             FileOutputStream fos = new FileOutputStream(enc)) {
-                            byte[] buf = new byte[4096]; int r;
-                            while ((r = is.read(buf)) > 0) fos.write(buf, 0, r);
-                        }
-                        File dec = new File(dir, enc.getName().replace(".enc", ".3gp"));
-                        CryptoHelper.decryptAudio(enc, dec);
-                        enc.delete();
-                        msg.attachmentPath = dec.getAbsolutePath();
-                        break;
-                    }
-                }
+                extractAttachment(m, "audios_recibidos", ".3gp",
+                        (enc, dec) -> CryptoHelper.decryptAudio(enc, dec), msg);
+            } else if (IMG_SUBJ.equals(subj)) {
+                msg.type = "image";
+                msg.body = "";
+                extractAttachment(m, "images_recibidas", ".jpg",
+                        (enc, dec) -> CryptoHelper.decryptFile(enc, dec), msg);
             }
 
-            // —— LOG: inserción de nuevo mensaje ——
-            Log.d(TAG, "Insertando mensaje nuevo de " + from + " at " + ts);
             Executors.newSingleThreadExecutor().execute(() -> dao.insert(msg));
 
-            // Notificar si no estás en ese chat
             String curr = AppConfig.getCurrentChat();
-            if (curr == null || !curr.trim().equalsIgnoreCase(from.trim())) {
-                NotificationCompat.Builder nb = new NotificationCompat.Builder(this, CHANNEL_NEWMSG)
+            if (curr == null || !curr.equalsIgnoreCase(from.trim())) {
+                NotificationCompat.Builder nb = new NotificationCompat.Builder(this, CH_NEWMSG)
                         .setContentTitle("Mensaje de " + from)
-                        .setContentText(msg.type.equals("text") ? msg.body : "Audio recibido")
+                        .setContentText(msg.type.equals("text") ? msg.body : msg.type + " recibido")
                         .setSmallIcon(R.drawable.ic_notification)
                         .setAutoCancel(true)
                         .setPriority(NotificationCompat.PRIORITY_DEFAULT);
                 if (Build.VERSION.SDK_INT < 33 ||
-                        checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                        checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
                                 == PackageManager.PERMISSION_GRANTED) {
                     NotificationManagerCompat.from(this).notify((int) ts, nb.build());
                 }
             }
-
         } catch (Exception e) {
             Log.e(TAG, "handleIncoming error", e);
         }
     }
 
-    @Override public IBinder onBind(Intent intent) {
-        return null;
+    private void extractAttachment(javax.mail.Message m,
+                                   String dirName,
+                                   String outExt,
+                                   AttachmentDecryptor decFunc,
+                                   Message msg) {
+        try {
+            Multipart mp = (Multipart) m.getContent();
+            for (int i = 0; i < mp.getCount(); i++) {
+                Part part = mp.getBodyPart(i);
+                String disp  = part.getDisposition();
+                String fname = part.getFileName();
+                if ((disp != null && Part.ATTACHMENT.equalsIgnoreCase(disp)) || fname != null) {
+                    File dir = new File(getExternalFilesDir(null), dirName);
+                    if (!dir.exists()) dir.mkdirs();
+                    File enc = new File(dir, System.currentTimeMillis() + "_" + fname);
+                    try (InputStream is = part.getInputStream();
+                         FileOutputStream fos = new FileOutputStream(enc)) {
+                        byte[] buf = new byte[4096]; int r;
+                        while ((r = is.read(buf)) > 0) fos.write(buf, 0, r);
+                    }
+                    File dec = new File(dir, enc.getName().replace(".enc", outExt));
+                    decFunc.decrypt(enc, dec);
+                    enc.delete();
+                    msg.attachmentPath = dec.getAbsolutePath();
+                    return;
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "extractAttachment error", e);
+        }
     }
 
-    @Override public void onDestroy() {
-        super.onDestroy();
-        running = false;
-    }
+    @FunctionalInterface
+    interface AttachmentDecryptor { void decrypt(File enc, File dec) throws Exception; }
+
+    @Override public IBinder onBind(Intent intent) { return null; }
+
+    @Override public void onDestroy() { running = false; super.onDestroy(); }
 }

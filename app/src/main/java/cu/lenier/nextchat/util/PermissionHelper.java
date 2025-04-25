@@ -16,6 +16,13 @@ public class PermissionHelper {
     /** Devuelve el array de permisos que faltan por aceptar */
     public static String[] missingPermissions(Activity act) {
         List<String> list = new ArrayList<>();
+
+        // Cámara
+        if (ContextCompat.checkSelfPermission(act,
+                android.Manifest.permission.CAMERA)
+                != PackageManager.PERMISSION_GRANTED) {
+            list.add(android.Manifest.permission.CAMERA);
+        }
         // Micrófono
         if (ContextCompat.checkSelfPermission(act,
                 android.Manifest.permission.RECORD_AUDIO)

@@ -44,6 +44,7 @@ import cu.lenier.nextchat.adapter.ChatListAdapter;
 import cu.lenier.nextchat.data.AppDatabase;
 import cu.lenier.nextchat.model.Message;
 import cu.lenier.nextchat.model.UnreadCount;
+import cu.lenier.nextchat.service.MailService;
 import cu.lenier.nextchat.work.MailSyncWorker;
 
 public class ChatListActivity extends AppCompatActivity {
@@ -67,6 +68,14 @@ public class ChatListActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_chat_list);
+
+
+        Intent svc = new Intent(this, MailService.class);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(svc);
+        } else {
+            startService(svc);
+        }
 
 
         //Version Automatica
@@ -164,7 +173,7 @@ public class ChatListActivity extends AppCompatActivity {
                 for (String c : contacts) {
                     Message last = db.messageDao().getLastMessageSync(c);
                     if (last != null) {
-                        previews.put(c, last.type.equals("text") ? last.body : "Audio");
+                        previews.put(c, last.type.equals("text") ? last.body : last.type);
                         times.put(c, last.timestamp);
                     } else {
                         previews.put(c, "");

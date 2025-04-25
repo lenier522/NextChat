@@ -37,12 +37,6 @@ public class AppConfig extends Application {
         createNotificationChannels();
         scheduleWorkerIfNeeded();
 
-        Intent svc = new Intent(this, MailService.class);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(svc);
-        } else {
-            startService(svc);
-        }
     }
 
     private void createNotificationChannels() {
