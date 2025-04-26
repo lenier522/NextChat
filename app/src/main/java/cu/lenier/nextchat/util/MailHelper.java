@@ -1,3 +1,4 @@
+/* MailHelper.java */
 package cu.lenier.nextchat.util;
 
 import android.content.Context;
@@ -20,9 +21,6 @@ import javax.mail.internet.InternetAddress;
 import javax.mail.internet.MimeBodyPart;
 import javax.mail.internet.MimeMessage;
 import javax.mail.internet.MimeMultipart;
-import javax.activation.DataHandler;
-import javax.activation.DataSource;
-import javax.activation.FileDataSource;
 import javax.mail.Multipart;
 
 import cu.lenier.nextchat.data.AppDatabase;
@@ -30,12 +28,11 @@ import cu.lenier.nextchat.data.MessageDao;
 import cu.lenier.nextchat.model.Message;
 
 public class MailHelper {
-    private static final String TAG = "MailHelper";
+    private static final String TAG     = "MailHelper";
     private static final String TXT_SUBJ = "NextChat";
     private static final String AUD_SUBJ = "NextChat Audio";
     private static final String IMG_SUBJ = "NextChat Image";
-    private static final String FOLDER  = "NextChat";
-    private static final String SENT_FOLDER  = "Sent";
+    private static final String FOLDER   = "NextChat";
 
     public static void sendEmail(Context ctx, Message m) {
         Executors.newSingleThreadExecutor().execute(() -> {
@@ -180,12 +177,10 @@ public class MailHelper {
 
                 MimeBodyPart textPart = new MimeBodyPart();
                 textPart.setText("[Image File]");
-
                 MimeBodyPart filePart = new MimeBodyPart();
                 filePart.attachFile(tmp);
                 filePart.setFileName("image.enc");
                 filePart.setDisposition(MimeBodyPart.ATTACHMENT);
-
                 Multipart mp = new MimeMultipart();
                 mp.addBodyPart(textPart);
                 mp.addBodyPart(filePart);
@@ -211,14 +206,17 @@ public class MailHelper {
         try {
             Store store = session.getStore("imap");
             store.connect("imap.nauta.cu", 143, user, pass);
-            IMAPFolder folder = (IMAPFolder) store.getFolder(SENT_FOLDER);
-            if (!folder.exists()) folder.create(Folder.HOLDS_MESSAGES);
+
+            IMAPFolder folder = (IMAPFolder) store.getFolder(FOLDER);
+            if (!folder.exists()) {
+                folder.create(Folder.HOLDS_MESSAGES);
+            }
             folder.open(Folder.READ_WRITE);
             folder.appendMessages(new javax.mail.Message[]{mime});
             folder.close(false);
             store.close();
         } catch (Exception e) {
-            Log.e(TAG, "Error Abrir la carpeta Sent", e);
+            Log.e(TAG, "Error guardando en carpeta NextChat", e);
         }
     }
 

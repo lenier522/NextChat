@@ -1,3 +1,4 @@
+/* MailService.java */
 package cu.lenier.nextchat.service;
 
 import android.app.NotificationChannel;
@@ -40,14 +41,14 @@ public class MailService extends Service {
     private static final String TXT_SUBJ  = "NextChat";
     private static final String AUD_SUBJ  = "NextChat Audio";
     private static final String IMG_SUBJ  = "NextChat Image";
-    private static final String FOLDER    = "NextChat";
+    private static final String FOLDER    = "INBOX";
     private static final String CH_SYNC   = "MailSyncChannel";
     private static final String CH_NEWMSG = "NewMsgChannel";
     private static final int    NOTIF_SYNC = 1;
 
     private MessageDao dao;
     private Session    session;
-    private IMAPFolder inbox;
+    private IMAPFolder nextChatFolder;
     private volatile boolean running = false;
 
     @Override public void onCreate() {
@@ -68,8 +69,10 @@ public class MailService extends Service {
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
         NotificationCompat.Builder b = new NotificationCompat.Builder(this, CH_SYNC)
-                .setContentTitle("NextChat").setContentText("Esperando mensajes…")
-                .setSmallIcon(android.R.drawable.ic_popup_sync).setOngoing(true);
+                .setContentTitle("NextChat")
+                .setContentText("Esperando mensajes…")
+                .setSmallIcon(android.R.drawable.ic_popup_sync)
+                .setOngoing(true);
         startForeground(NOTIF_SYNC, b.build());
 
         if (!running) {
@@ -88,58 +91,72 @@ public class MailService extends Service {
                 store = (IMAPStore) session.getStore("imap");
                 store.connect("imap.nauta.cu", 143, email, pass);
 
-                // Abrimos la misma carpeta "NextChat" utilizada al enviar
-                inbox = (IMAPFolder) store.getFolder("INBOX");
-                if (!inbox.exists()) inbox.create(Folder.HOLDS_MESSAGES);
-                inbox.open(Folder.READ_WRITE);
-
-                // Procesar mensajes no vistos
-                for (javax.mail.Message m : inbox.search(new FlagTerm(new Flags(Flags.Flag.SEEN), false))) {
-                    handleIncoming(m);
+                // Abrir/crear carpeta NextChat
+                nextChatFolder = (IMAPFolder) store.getFolder(FOLDER);
+                if (!nextChatFolder.exists()) {
+                    nextChatFolder.create(Folder.HOLDS_MESSAGES);
                 }
-                inbox.setFlags(inbox.search(new FlagTerm(new Flags(Flags.Flag.SEEN), false)),
-                        new Flags(Flags.Flag.SEEN), true);
+                nextChatFolder.open(Folder.READ_WRITE);
 
-                // Listener para nuevos mensajes
-                inbox.addMessageCountListener(new javax.mail.event.MessageCountAdapter() {
+                // Procesar no vistos
+                for (javax.mail.Message m : nextChatFolder.search(new FlagTerm(new Flags(Flags.Flag.SEEN), false))) {
+                    handleIncoming(m, email);
+                }
+                nextChatFolder.setFlags(
+                        nextChatFolder.search(new FlagTerm(new Flags(Flags.Flag.SEEN), false)),
+                        new Flags(Flags.Flag.SEEN),
+                        true
+                );
+
+                // Listener nuevos
+                nextChatFolder.addMessageCountListener(new javax.mail.event.MessageCountAdapter() {
                     @Override public void messagesAdded(javax.mail.event.MessageCountEvent ev) {
-                        for (javax.mail.Message m : ev.getMessages()) handleIncoming(m);
-                        try { inbox.setFlags(ev.getMessages(), new Flags(Flags.Flag.SEEN), true); }
-                        catch (Exception ignored) {}
+                        for (javax.mail.Message m : ev.getMessages()) {
+                            handleIncoming(m, email);
+                        }
+                        try {
+                            nextChatFolder.setFlags(ev.getMessages(), new Flags(Flags.Flag.SEEN), true);
+                        } catch (Exception ignored) {}
                     }
                 });
 
-                while (running && inbox.isOpen()) {
-                    try { inbox.idle(); }
+                while (running && nextChatFolder.isOpen()) {
+                    try { nextChatFolder.idle(); }
                     catch (Exception idleEx) { break; }
                 }
+
             } catch (Exception e) {
                 Log.e(TAG, "imapIdleLoop fallo", e);
             } finally {
-                try { if (inbox.isOpen()) inbox.close(false); } catch (Exception ignored) {}
-                try { if (store != null && store.isConnected()) store.close(); } catch (Exception ignored) {}
+                try { if (nextChatFolder != null && nextChatFolder.isOpen()) nextChatFolder.close(false); }
+                catch (Exception ignored) {}
+                try { if (store != null && store.isConnected()) store.close(); }
+                catch (Exception ignored) {}
             }
             try { Thread.sleep(5000); } catch (InterruptedException ignored) {}
         }
     }
 
-    private void handleIncoming(javax.mail.Message m) {
+    private void handleIncoming(javax.mail.Message m, String myEmail) {
         try {
-            String subj = m.getSubject();
-            if (!TXT_SUBJ.equals(subj) && !AUD_SUBJ.equals(subj) && !IMG_SUBJ.equals(subj)) return;
-
-
-            String me   = getSharedPreferences("prefs", MODE_PRIVATE).getString("email", "");
             String from = m.getFrom()[0].toString();
+            if (from.equalsIgnoreCase(myEmail)) {
+                // Descarta los mensajes que tú mismo enviaste
+                return;
+            }
 
-            if (from.toLowerCase().contains(me.toLowerCase())) return;
-
+            String subj = m.getSubject();
             long ts     = m.getReceivedDate().getTime();
-            if (dao.countExisting(from, me, subj, ts) > 0) return;
+            if (!TXT_SUBJ.equals(subj) && !AUD_SUBJ.equals(subj) && !IMG_SUBJ.equals(subj)) {
+                return;
+            }
+            if (dao.countExisting(from, myEmail, subj, ts) > 0) {
+                return;
+            }
 
             Message msg = new Message();
             msg.fromAddress = from;
-            msg.toAddress   = me;
+            msg.toAddress   = myEmail;
             msg.subject     = subj;
             msg.timestamp   = ts;
             msg.sent        = false;
@@ -171,12 +188,14 @@ public class MailService extends Service {
                         .setSmallIcon(R.drawable.ic_notification)
                         .setAutoCancel(true)
                         .setPriority(NotificationCompat.PRIORITY_DEFAULT);
+
                 if (Build.VERSION.SDK_INT < 33 ||
                         checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
                                 == PackageManager.PERMISSION_GRANTED) {
                     NotificationManagerCompat.from(this).notify((int) ts, nb.build());
                 }
             }
+
         } catch (Exception e) {
             Log.e(TAG, "handleIncoming error", e);
         }
@@ -199,8 +218,11 @@ public class MailService extends Service {
                     File enc = new File(dir, System.currentTimeMillis() + "_" + fname);
                     try (InputStream is = part.getInputStream();
                          FileOutputStream fos = new FileOutputStream(enc)) {
-                        byte[] buf = new byte[4096]; int r;
-                        while ((r = is.read(buf)) > 0) fos.write(buf, 0, r);
+                        byte[] buf = new byte[4096];
+                        int r;
+                        while ((r = is.read(buf)) > 0) {
+                            fos.write(buf, 0, r);
+                        }
                     }
                     File dec = new File(dir, enc.getName().replace(".enc", outExt));
                     decFunc.decrypt(enc, dec);
@@ -215,9 +237,16 @@ public class MailService extends Service {
     }
 
     @FunctionalInterface
-    interface AttachmentDecryptor { void decrypt(File enc, File dec) throws Exception; }
+    interface AttachmentDecryptor {
+        void decrypt(File enc, File dec) throws Exception;
+    }
 
-    @Override public IBinder onBind(Intent intent) { return null; }
+    @Override public IBinder onBind(Intent intent) {
+        return null;
+    }
 
-    @Override public void onDestroy() { running = false; super.onDestroy(); }
+    @Override public void onDestroy() {
+        running = false;
+        super.onDestroy();
+    }
 }
